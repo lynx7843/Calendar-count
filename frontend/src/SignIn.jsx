@@ -19,7 +19,7 @@ function Icon({ name, size }) {
   )
 }
 
-export default function SignIn({ onSuccess }) {
+export default function SignIn({ onSuccess, onSignUp }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -137,7 +137,14 @@ export default function SignIn({ onSuccess }) {
           <div className="switch-prompt">
             <p>
               Don&apos;t have an account?
-              <a href="#" className="link" onClick={(e) => e.preventDefault()}>
+              <a
+                href="#"
+                className="link"
+                onClick={(e) => {
+                  e.preventDefault()
+                  onSignUp?.()
+                }}
+              >
                 Sign up
               </a>
             </p>
