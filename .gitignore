@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+
+# Build output
+dist/
+dist-ssr/
+__pycache__/
+*.py[cod]
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets
+.env
+.env.*
+*.local
+!.env.example
+*serviceAccount*.json
+*-firebase-adminsdk-*.json
+
+# Logs
+*.log
+logs/
+
+# Editor and OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.sw?
+
+# Private notes
+agent.md
+features.md
