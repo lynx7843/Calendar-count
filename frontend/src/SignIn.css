@@ -162,3 +162,8 @@
   margin-top: 16px; text-align: center; color: var(--outline);
   font: 600 11px/14px 'Inter', sans-serif; letter-spacing: 0.05em; text-transform: uppercase;
 }
+
+.signin .auth-info {
+  padding: 8px; border-radius: 2px; background: var(--primary-fixed); color: var(--primary);
+  font-size: 12px; line-height: 16px;
+}

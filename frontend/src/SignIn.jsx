@@ -1,9 +1,15 @@
 import { useState } from 'react'
+import {
+  GoogleAuthProvider,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  sendPasswordResetEmail,
+  setPersistence,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+} from 'firebase/auth'
+import { auth, authMessage } from './auth.js'
 import './SignIn.css'
-
-// Dummy credentials until a backend exists.
-const DUMMY_EMAIL = 'email'
-const DUMMY_PASSWORD = 'password'
 
 const BADGES = [
   { icon: 'sync', label: 'Sync with Google Calendar' },
@@ -19,20 +25,42 @@ function Icon({ name, size }) {
   )
 }
 
-export default function SignIn({ onSuccess, onSignUp }) {
+export default function SignIn({ onSignUp }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [remember, setRemember] = useState(true)
   const [error, setError] = useState('')
+  const [info, setInfo] = useState('')
+
+  // Sign-in success is picked up by onAuthStateChanged in App.
+  const run = async (action) => {
+    setError('')
+    setInfo('')
+    try {
+      await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence)
+      await action()
+    } catch (err) {
+      setError(authMessage(err))
+    }
+  }
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (email === DUMMY_EMAIL && password === DUMMY_PASSWORD) {
+    if (!email || !password) return setError('Enter your email and password.')
+    run(() => signInWithEmailAndPassword(auth, email, password))
+  }
+
+  const handleReset = async (e) => {
+    e.preventDefault()
+    setInfo('')
+    if (!email) return setError('Enter your email above to reset your password.')
+    try {
+      await sendPasswordResetEmail(auth, email)
       setError('')
-      onSuccess?.()
-    } else {
-      setError('Incorrect email or password.')
+      setInfo('If an account exists for this email, a reset link is on its way.')
+    } catch (err) {
+      setError(authMessage(err))
     }
   }
 
@@ -55,7 +83,7 @@ export default function SignIn({ onSuccess, onSignUp }) {
             <p className="tagline">Sign in to manage your daily and repeating activities</p>
           </div>
 
-          <button type="button" className="google-btn">
+          <button type="button" className="google-btn" onClick={() => run(() => signInWithPopup(auth, new GoogleAuthProvider()))}>
             <svg width="18" height="18" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
               <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
@@ -87,7 +115,7 @@ export default function SignIn({ onSuccess, onSignUp }) {
             <div className="field-group">
               <div className="label-row">
                 <label htmlFor="auth-password">Password</label>
-                <a href="#" className="link" onClick={(e) => e.preventDefault()}>
+                <a href="#" className="link" onClick={handleReset}>
                   Forgot password?
                 </a>
               </div>
@@ -119,12 +147,17 @@ export default function SignIn({ onSuccess, onSignUp }) {
                 checked={remember}
                 onChange={(e) => setRemember(e.target.checked)}
               />
-              <span>Remember this device for 30 days</span>
+              <span>Keep me signed in on this device</span>
             </label>
 
             {error && (
               <p className="auth-error" role="alert">
                 {error}
+              </p>
+            )}
+            {info && (
+              <p className="auth-info" role="status">
+                {info}
               </p>
             )}
 
