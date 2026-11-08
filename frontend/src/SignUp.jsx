@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { GoogleAuthProvider, createUserWithEmailAndPassword, signInWithPopup, updateProfile } from 'firebase/auth'
+import { auth, authMessage } from './auth.js'
 import './SignUp.css'
 
 const FEATURES = [
@@ -46,19 +48,42 @@ function passwordStrength(val) {
 const STRENGTH_LABELS = ['Empty', 'Weak', 'Good', 'Strong']
 const STRENGTH_TONES = ['', 'weak', 'good', 'strong']
 
-export default function SignUp({ onSignIn }) {
+export default function SignUp({ onSignIn, onLegal }) {
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [agreed, setAgreed] = useState(false)
+  const [error, setError] = useState('')
 
   const strength = passwordStrength(password)
   const tone = STRENGTH_TONES[strength]
 
-  // Skeleton only: account creation is not wired to a backend yet.
-  const handleSubmit = (e) => {
+  // Success is picked up by onAuthStateChanged in App.
+  const handleSubmit = async (e) => {
     e.preventDefault()
+    setError('')
+    try {
+      const { user } = await createUserWithEmailAndPassword(auth, email, password)
+      await updateProfile(user, { displayName: fullName.trim() })
+    } catch (err) {
+      setError(authMessage(err))
+    }
+  }
+
+  const handleGoogle = async () => {
+    if (!agreed) return setError('Please accept the Terms of Service and Privacy Policy.')
+    setError('')
+    try {
+      await signInWithPopup(auth, new GoogleAuthProvider())
+    } catch (err) {
+      setError(authMessage(err))
+    }
+  }
+
+  const openLegal = (page) => (e) => {
+    e.preventDefault()
+    onLegal?.(page)
   }
 
   return (
@@ -106,7 +131,7 @@ export default function SignUp({ onSignIn }) {
             ))}
           </div>
 
-          <button type="button" className="google-btn">
+          <button type="button" className="google-btn" onClick={handleGoogle}>
             <svg width="16" height="16" viewBox="0 0 24 24">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
               <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
@@ -170,6 +195,7 @@ export default function SignUp({ onSignIn }) {
                   type={showPassword ? 'text' : 'password'}
                   autoComplete="new-password"
                   placeholder="Minimum 8 characters"
+                  minLength={8}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
@@ -200,10 +226,16 @@ export default function SignUp({ onSignIn }) {
               />
               <label htmlFor="terms">
                 I agree to the{' '}
-                <a href="#" onClick={(e) => e.preventDefault()}>Terms of Service</a> and{' '}
-                <a href="#" onClick={(e) => e.preventDefault()}>Privacy Policy</a>.
+                <a href="#" onClick={openLegal('terms')}>Terms of Service</a> and{' '}
+                <a href="#" onClick={openLegal('privacy')}>Privacy Policy</a>.
               </label>
             </div>
+
+            {error && (
+              <p className="auth-error" role="alert">
+                {error}
+              </p>
+            )}
 
             <button type="submit" className="submit-btn">
               <span>Create Account</span>

@@ -178,3 +178,10 @@
   .signup .card { padding: 24px; }
   .signup .trust { gap: 12px; }
 }
+
+.signup .auth-error {
+  margin-top: 12px; padding: 8px; border-radius: 2px; background: #ffdad6; color: #93000a;
+  font-size: 12px; line-height: 16px;
+}
+.signup .legal p { margin-top: 12px; color: var(--on-surface-variant); }
+.signup .legal .submit-btn { margin-top: 24px; }

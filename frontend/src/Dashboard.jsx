@@ -371,7 +371,7 @@ function RowCells({ row, hide }) {
   )
 }
 
-export default function Dashboard() {
+export default function Dashboard({ onSignOut }) {
   const [filter, setFilter] = useState('all')
   const [modalOpen, setModalOpen] = useState(false)
 
@@ -427,6 +427,9 @@ export default function Dashboard() {
             </button>
             <button type="button" className="icon-btn pad" title="Settings" aria-label="Settings">
               <Icon name="settings" size={20} />
+            </button>
+            <button type="button" className="icon-btn pad" title="Sign out" aria-label="Sign out" onClick={onSignOut}>
+              <Icon name="logout" size={20} />
             </button>
             <div className="avatar">
               <Icon name="person" size={18} />
