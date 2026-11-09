@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as fa from 'firebase/auth'
 import App from './App.jsx'
 
+vi.mock('./api.js', () => ({ api: vi.fn(() => Promise.resolve([])) }))
 vi.mock('firebase/app', () => ({ initializeApp: vi.fn(() => ({})) }))
 vi.mock('firebase/auth', () => ({
   getAuth: vi.fn(() => ({})),

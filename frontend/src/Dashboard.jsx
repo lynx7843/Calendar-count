@@ -1,100 +1,10 @@
-import { useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
+import { api } from './api.js'
+import {
+  addDays, completePatch, dayLabel, monthGrid, monthLabel, periodLabel, periodRange,
+  daysIn, sameDay, shift, startOfDay, timeLabel, toItems,
+} from './calendar.js'
 import './Dashboard.css'
-
-const DAYS = [
-  { dow: 'MON', date: 14, stat: '100%', state: 'past' },
-  { dow: 'TUE', date: 15, stat: '100%', state: 'past' },
-  { dow: 'WED', date: 16, stat: '6/9 Done', state: 'today' },
-  { dow: 'THU', date: 17, stat: '0/8', state: 'future' },
-  { dow: 'FRI', date: 18, stat: '0/8', state: 'future' },
-  { dow: 'SAT', date: 19, stat: '0/4', state: 'future' },
-  { dow: 'SUN', date: 20, stat: '0/3', state: 'future' },
-]
-
-// Cell kinds:
-//   done      – past day, completed
-//   doneToday – today, completed (cut-off stripe)
-//   routine   – scheduled repeating routine
-//   onetime   – scheduled one-time task
-//   pending   – today, awaiting completion (checkbox)
-const done = (title, meta) => ({ kind: 'done', title, meta })
-const doneToday = (title, meta, extra) => ({ kind: 'doneToday', title, meta, extra })
-const routine = (title, meta, icon = true) => ({ kind: 'routine', title, meta, icon })
-
-const ROWS = [
-  {
-    time: '07:00 AM',
-    cells: [
-      done('Morning Run 5K', 'Mon-Fri'),
-      done('Morning Run 5K', 'Mon-Fri'),
-      doneToday('Daily Morning Run', 'Mon-Fri · 45m', 'Done #14'),
-      routine('Daily Morning Run', '7:00 - 7:45 AM'),
-      routine('Daily Morning Run', '7:00 - 7:45 AM'),
-      null,
-      null,
-    ],
-  },
-  {
-    time: '08:30 AM',
-    cells: [
-      done('Hydration & Vitamins', 'Routine Daily'),
-      done('Hydration & Vitamins', 'Routine Daily'),
-      doneToday('Hydration & Vitamins', 'Everyday'),
-      routine('Hydration & Vitamins', '8:30 AM · Daily', false),
-      routine('Hydration & Vitamins', '8:30 AM · Daily', false),
-      routine('Hydration & Vitamins', '8:30 AM · Daily', false),
-      routine('Hydration & Vitamins', '8:30 AM · Daily', false),
-    ],
-  },
-  {
-    time: '10:00 AM',
-    cells: [
-      done('Team Rhythm Sync', 'Mon, Wed, Fri'),
-      null,
-      doneToday('Team Sync · Sprint Review', 'Weekly: Mon, Wed, Fri'),
-      { kind: 'onetime', title: 'Design System QA', meta: '10:00 - 11:30 AM' },
-      routine('Team Rhythm Sync', '10:00 AM · Weekly'),
-      null,
-      null,
-    ],
-  },
-  {
-    time: '02:30 PM',
-    cells: [
-      null,
-      null,
-      { kind: 'pending', title: 'Dentist Appointment', badge: 'tag', meta: '2:30 PM (45m)', note: 'Upcoming', now: true },
-      null,
-      null,
-      null,
-      null,
-    ],
-  },
-  {
-    time: '04:00 PM',
-    cells: [
-      null,
-      null,
-      { kind: 'pending', title: 'Client Proposal Review', badge: 'tag2', meta: '4:00 PM – 5:00 PM', note: 'Apex Dynamics' },
-      null,
-      null,
-      null,
-      null,
-    ],
-  },
-  {
-    time: '09:00 PM',
-    cells: [
-      done('Read 30 mins', 'Evening Daily'),
-      done('Read 30 mins', 'Evening Daily'),
-      { kind: 'pending', title: 'Read 30 mins', badge: 'repeat', meta: 'Tonight 9:00 PM', note: 'Daily Routine', primaryMeta: true },
-      routine('Read 30 mins', '9:00 PM · Daily'),
-      routine('Read 30 mins', '9:00 PM · Daily'),
-      routine('Read 30 mins', '9:00 PM · Daily'),
-      routine('Read 30 mins', '9:00 PM · Daily'),
-    ],
-  },
-]
 
 const NAV_VIEWS = ['Month', 'Week', 'Day', 'Agenda']
 
@@ -103,12 +13,6 @@ const FILTERS = [
   { icon: 'repeat', label: 'Repeating Routines' },
   { icon: 'check_circle', label: 'One-time Tasks' },
   { icon: 'history', label: 'Completed History' },
-]
-
-const MINI_CAL = [
-  ...[29, 30].map((d) => ({ d, out: true })),
-  ...Array.from({ length: 31 }, (_, i) => ({ d: i + 1, today: i + 1 === 16 })),
-  ...[1, 2].map((d) => ({ d, out: true })),
 ]
 
 const INSIGHTS = [
@@ -151,12 +55,35 @@ function Icon({ name, size, className = '' }) {
   )
 }
 
-function Chip({ cell }) {
+const WEEK_DOW = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
+
+// Maps an item to a chip kind relative to now.
+function cellFor(item, now) {
+  const time = timeLabel(item.start)
+  const meta = item.end ? `${time} – ${timeLabel(item.end)}` : item.hours ? `${time} · ${item.hours}h` : time
+  const cell = { title: item.title, meta, routine: item.routine }
+  if (item.done) return { ...cell, kind: sameDay(item.start, now) ? 'doneToday' : 'done' }
+  if (item.start < addDays(startOfDay(now), 1)) {
+    const note = item.start > now ? 'Upcoming' : sameDay(item.start, now) ? '' : 'Missed'
+    return { ...cell, kind: 'pending', note }
+  }
+  return { ...cell, kind: item.routine ? 'routine' : 'onetime' }
+}
+
+function Chip({ cell, onToggle }) {
+  const undo = (
+    <button type="button" className="check-box" aria-label={`Mark ${cell.title} incomplete`} onClick={() => onToggle(false)}>
+      <Icon name="check" size={11} />
+    </button>
+  )
   switch (cell.kind) {
     case 'done':
       return (
         <div className="chip chip-done">
-          <span className="chip-title struck">{cell.title}</span>
+          <div className="row gap-1">
+            {undo}
+            <span className="chip-title struck">{cell.title}</span>
+          </div>
           <span className="chip-sub muted-outline">{cell.meta}</span>
         </div>
       )
@@ -165,17 +92,14 @@ function Chip({ cell }) {
         <div className="chip chip-done chip-done-today">
           <div className="cutoff" />
           <div className="row gap-1 rel">
-            <span className="check-box">
-              <Icon name="check" size={11} />
-            </span>
+            {undo}
             <span className="chip-title struck">{cell.title}</span>
           </div>
           <div className="row between chip-sub rel">
             <span className="row gap-1 pill-mini">
-              <Icon name="repeat" size={11} className="primary" />
+              {cell.routine && <Icon name="repeat" size={11} className="primary" />}
               {cell.meta}
             </span>
-            {cell.extra && <span className="primary bold">{cell.extra}</span>}
           </div>
         </div>
       )
@@ -184,7 +108,7 @@ function Chip({ cell }) {
         <div className="chip chip-routine">
           <div className="row between">
             <span className="chip-title strong">{cell.title}</span>
-            {cell.icon && <Icon name="repeat" size={13} className="primary" />}
+            <Icon name="repeat" size={13} className="primary" />
           </div>
           <span className="chip-sub">{cell.meta}</span>
         </div>
@@ -204,28 +128,20 @@ function Chip({ cell }) {
         <div className="chip chip-pending">
           <div className="row between top gap-1">
             <div className="row gap-1h grow">
-              <input type="checkbox" aria-label={`Complete ${cell.title}`} />
+              <input type="checkbox" checked={false} aria-label={`Complete ${cell.title}`} onChange={() => onToggle(true)} />
               <span className="chip-title strong dark">{cell.title}</span>
             </div>
-            {cell.badge === 'repeat' ? (
+            {cell.routine ? (
               <span className="badge-repeat">
                 <Icon name="repeat" size={13} />
               </span>
             ) : (
-              <span className={`badge-tag ${cell.badge === 'tag2' ? 'tag2' : ''}`}>One-time</span>
+              <span className="badge-tag">One-time</span>
             )}
           </div>
           <div className="row between pending-meta">
-            <span className={cell.primaryMeta ? 'primary medium' : ''}>{cell.meta}</span>
-            <span
-              className={
-                cell.note === 'Upcoming'
-                  ? 'primary bold small'
-                  : cell.note === 'Daily Routine'
-                    ? 'badge-note'
-                    : 'note'
-              }
-            >
+            <span>{cell.meta}</span>
+            <span className={cell.note === 'Upcoming' ? 'primary bold small' : 'note'}>
               {cell.note}
             </span>
           </div>
@@ -352,32 +268,136 @@ function QuickAddModal({ onClose }) {
   )
 }
 
-function RowCells({ row, hide }) {
+function dayStat(items, d, now) {
+  const list = items.filter((i) => sameDay(i.start, d))
+  const done = list.filter((i) => i.done).length
+  if (!list.length) return ''
+  if (sameDay(d, now)) return `${done}/${list.length} Done`
+  return d < now ? `${Math.round((done / list.length) * 100)}%` : `${done}/${list.length}`
+}
+
+// Week and Day views: one row per hour that has items.
+function TimeGrid({ days, items, now, renderItem }) {
+  const state = (d) => (sameDay(d, now) ? 'today' : d < now ? 'past' : 'future')
+  const showsToday = days.some((d) => sameDay(d, now))
+  const hours = [...new Set([...items.map((i) => i.start.getHours()), ...(showsToday ? [now.getHours()] : [])])]
+  hours.sort((a, b) => a - b)
+  const tz = now.toLocaleTimeString('en-US', { timeZoneName: 'short' }).split(' ').pop()
+
   return (
-    <>
-      <div className="time-cell">{row.time}</div>
-      {row.cells.map((cell, i) => (
-        <div key={i} className={`slot bg-${DAYS[i].state}`}>
-          {cell?.now && (
-            <div className="now-line">
-              <span />
-              <div />
+    <div className="calendar" style={{ gridTemplateColumns: `80px repeat(${days.length}, 1fr)`, minWidth: days.length > 1 ? undefined : 0 }}>
+      <div className="col-head tz label-sm muted">{tz}</div>
+      {days.map((d) => {
+        const dow = WEEK_DOW[(d.getDay() + 6) % 7]
+        const stat = dayStat(items, d, now)
+        return (
+          <div key={d.getTime()} className={`col-head ${state(d) === 'today' ? 'head-today' : ''}`}>
+            {state(d) === 'today' ? (
+              <>
+                <span className="label-sm primary bold">TODAY · {dow}</span>
+                <div className="today-badge">{d.getDate()}</div>
+                <span className="label-sm primary bold mt-half">{stat}</span>
+              </>
+            ) : (
+              <>
+                <span className="label-sm muted">{dow}</span>
+                <span className="headline-sm">{d.getDate()}</span>
+                <span className={`label-sm ${state(d) === 'past' ? 'primary bold' : 'muted'}`}>{stat}</span>
+              </>
+            )}
+          </div>
+        )
+      })}
+      {hours.map((h) => (
+        <Fragment key={h}>
+          <div className="time-cell">{timeLabel(new Date(2000, 0, 1, h))}</div>
+          {days.map((d) => (
+            <div key={d.getTime()} className={`slot bg-${state(d)}`}>
+              {sameDay(d, now) && h === now.getHours() && (
+                <div className="now-line">
+                  <span />
+                  <div />
+                </div>
+              )}
+              {items.filter((i) => sameDay(i.start, d) && i.start.getHours() === h).map(renderItem)}
             </div>
-          )}
-          {cell && !hide(cell.kind) && <Chip cell={cell} />}
+          ))}
+        </Fragment>
+      ))}
+    </div>
+  )
+}
+
+function MonthView({ cursor, items, now, renderItem }) {
+  return (
+    <div className="month">
+      {WEEK_DOW.map((d) => (
+        <div key={d} className="col-head label-sm muted">{d}</div>
+      ))}
+      {monthGrid(cursor).map((d) => (
+        <div key={d.getTime()} className={`month-cell ${d.getMonth() === cursor.getMonth() ? '' : 'out'}`}>
+          <span className={sameDay(d, now) ? 'today-badge' : 'label-md'}>{d.getDate()}</span>
+          {items.filter((i) => sameDay(i.start, d)).map(renderItem)}
         </div>
       ))}
-    </>
+    </div>
+  )
+}
+
+function AgendaView({ items, renderItem }) {
+  const days = [...new Map(items.map((i) => [startOfDay(i.start).getTime(), startOfDay(i.start)])).values()]
+  return (
+    <div className="agenda">
+      {days.map((d) => (
+        <section key={d.getTime()} className="col gap-xs">
+          <span className="label-md">{dayLabel(d)}</span>
+          {items.filter((i) => sameDay(i.start, d)).map(renderItem)}
+        </section>
+      ))}
+    </div>
   )
 }
 
 export default function Dashboard({ onSignOut }) {
   const [filter, setFilter] = useState('all')
   const [modalOpen, setModalOpen] = useState(false)
+  const [view, setView] = useState('Week')
+  const [cursor, setCursor] = useState(() => new Date())
+  const [items, setItems] = useState([])
+  const [error, setError] = useState('')
+  const now = new Date()
+
+  useEffect(() => {
+    // shortcut: loads all docs once and filters client-side, add range queries when data grows
+    Promise.all(['/events', '/assignments', '/tasks'].map((p) => api(p)))
+      .then(([events, assignments, tasks]) => setItems(toItems(events, assignments, tasks)))
+      .catch((e) => setError(`Couldn't load your calendar: ${e.message}`))
+  }, [])
+
+  // Optimistic update, reverted if the save fails.
+  const toggle = async (item, done) => {
+    const set = (v) =>
+      setItems((list) => list.map((i) => (i.id === item.id && i.source === item.source ? { ...i, done: v } : i)))
+    set(done)
+    try {
+      await api(`/${item.source}/${item.id}`, { method: 'PATCH', body: completePatch(item, done) })
+    } catch (e) {
+      set(!done)
+      setError(`Couldn't save "${item.title}": ${e.message}`)
+    }
+  }
 
   const hide = (kind) =>
     (filter === 'pending' && (kind === 'done' || kind === 'doneToday')) ||
     (filter === 'done' && kind === 'pending')
+
+  const [start, end] = periodRange(view, cursor)
+  const visible = items.filter((i) => i.start >= start && i.start < end)
+  const renderItem = (item) => {
+    const cell = cellFor(item, now)
+    return hide(cell.kind) ? null : <Chip key={`${item.source}/${item.id}`} cell={cell} onToggle={(v) => toggle(item, v)} />
+  }
+  const viewProps = { items: visible, now, renderItem }
 
   const filterButtons = [
     { id: 'all', label: 'All Activities' },
@@ -395,16 +415,16 @@ export default function Dashboard({ onSignOut }) {
           </div>
           <div className="vdivider hide-md" />
           <div className="row gap-xs">
-            <button type="button" className="btn-today">Today</button>
+            <button type="button" className="btn-today" onClick={() => setCursor(new Date())}>Today</button>
             <div className="row nav-arrows">
-              <button type="button" className="icon-btn" aria-label="Previous period">
+              <button type="button" className="icon-btn" aria-label="Previous period" onClick={() => setCursor(shift(view, cursor, -1))}>
                 <Icon name="chevron_left" size={20} />
               </button>
-              <button type="button" className="icon-btn" aria-label="Next period">
+              <button type="button" className="icon-btn" aria-label="Next period" onClick={() => setCursor(shift(view, cursor, 1))}>
                 <Icon name="chevron_right" size={20} />
               </button>
             </div>
-            <span className="headline-sm hide-sm period">October 2024</span>
+            <span className="headline-sm hide-sm period">{monthLabel(cursor)}</span>
           </div>
         </div>
 
@@ -416,7 +436,16 @@ export default function Dashboard({ onSignOut }) {
         <div className="row gap-md">
           <nav className="view-tabs hide-xl">
             {NAV_VIEWS.map((v) => (
-              <a key={v} href="#" onClick={(e) => e.preventDefault()}>
+              <a
+                key={v}
+                href="#"
+                className={view === v ? 'on' : ''}
+                aria-current={view === v ? 'page' : undefined}
+                onClick={(e) => {
+                  e.preventDefault()
+                  setView(v)
+                }}
+              >
                 {v}
               </a>
             ))}
@@ -447,22 +476,32 @@ export default function Dashboard({ onSignOut }) {
 
           <div className="mini-cal">
             <div className="row between mini-head">
-              <span className="label-md">October 2024</span>
+              <span className="label-md">{monthLabel(cursor)}</span>
               <div className="row nav-arrows">
-                <Icon name="chevron_left" size={16} className="clickable" />
-                <Icon name="chevron_right" size={16} className="clickable" />
+                <button type="button" className="icon-btn" aria-label="Previous month" onClick={() => setCursor(shift('Month', cursor, -1))}>
+                  <Icon name="chevron_left" size={16} />
+                </button>
+                <button type="button" className="icon-btn" aria-label="Next month" onClick={() => setCursor(shift('Month', cursor, 1))}>
+                  <Icon name="chevron_right" size={16} />
+                </button>
               </div>
             </div>
             <div className="grid-7 label-sm dow">
-              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+              {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
                 <span key={i}>{d}</span>
               ))}
             </div>
             <div className="grid-7 days">
-              {MINI_CAL.map((c, i) => (
-                <span key={i} className={c.out ? 'out' : c.today ? 'is-today' : 'day'}>
-                  {c.d}
-                </span>
+              {monthGrid(cursor).map((d) => (
+                <button
+                  key={d.getTime()}
+                  type="button"
+                  aria-label={dayLabel(d)}
+                  className={sameDay(d, now) ? 'is-today' : d.getMonth() === cursor.getMonth() ? 'day' : 'out'}
+                  onClick={() => setCursor(d)}
+                >
+                  {d.getDate()}
+                </button>
               ))}
             </div>
           </div>
@@ -564,10 +603,9 @@ export default function Dashboard({ onSignOut }) {
         <div className="workspace">
           <div className="row between wrap gap-md">
             <div className="row gap-sm">
-              <span className="headline-md">Week 42</span>
+              <span className="headline-md">{view}</span>
               <span className="muted">·</span>
-              <span className="body-md-medium muted">Oct 14 – Oct 20, 2024</span>
-              <span className="pill pill-grey">High Frequency Track</span>
+              <span className="body-md-medium muted">{periodLabel(view, cursor)}</span>
             </div>
             <div className="row gap-md label-sm muted hide-md-down">
               <div className="row gap-1h"><span className="dot d-primary" /><span>Repeating Routines</span></div>
@@ -576,32 +614,17 @@ export default function Dashboard({ onSignOut }) {
             </div>
           </div>
 
-          <div className="calendar-scroll">
-            <div className="calendar">
-              <div className="col-head tz label-sm muted">GMT-4</div>
-              {DAYS.map((d) => (
-                <div key={d.date} className={`col-head ${d.state === 'today' ? 'head-today' : ''}`}>
-                  {d.state === 'today' ? (
-                    <>
-                      <span className="label-sm primary bold">TODAY · WED</span>
-                      <div className="today-badge">{d.date}</div>
-                      <span className="label-sm primary bold mt-half">{d.stat}</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="label-sm muted">{d.dow}</span>
-                      <span className="headline-sm">{d.date}</span>
-                      <span className={`label-sm ${d.state === 'past' ? 'primary bold' : 'muted'}`}>{d.stat}</span>
-                    </>
-                  )}
-                </div>
-              ))}
-
-              {ROWS.map((row) => (
-                <RowCells key={row.time} row={row} hide={hide} />
-              ))}
+          {error && <p className="cal-error" role="alert">{error}</p>}
+          {view === 'Month' ? (
+            <MonthView cursor={cursor} {...viewProps} />
+          ) : view === 'Agenda' ? (
+            <AgendaView {...viewProps} />
+          ) : (
+            <div className="calendar-scroll">
+              <TimeGrid days={view === 'Day' ? [startOfDay(cursor)] : daysIn(start, end)} {...viewProps} />
             </div>
-          </div>
+          )}
+          {!visible.length && !error && <p className="body-sm muted">No activities in this period.</p>}
 
           <div className="insights">
             {INSIGHTS.map((i) => (
