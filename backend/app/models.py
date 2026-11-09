@@ -23,6 +23,7 @@ class Event(Doc):
     endTime: datetime
     type: str = "onetime"
     color: str = ""
+    completed: bool = False
 
     @model_validator(mode="after")
     def check_times(self):

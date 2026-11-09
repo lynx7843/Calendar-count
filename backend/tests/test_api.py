@@ -50,6 +50,7 @@ def test_event_time_validation(client):
     assert client.post("/events", json=bad).status_code == 422
     event_id = client.post("/events", json={**bad, "endTime": "2026-01-01T11:00:00Z"}).json()["id"]
     assert client.patch(f"/events/{event_id}", json={"endTime": "2026-01-01T08:00:00Z"}).status_code == 422
+    assert client.patch(f"/events/{event_id}", json={"completed": True}).json()["completed"] is True
 
 
 def test_progress_and_assignment_create(client):

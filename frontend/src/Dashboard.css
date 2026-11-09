@@ -375,3 +375,16 @@
   .dash .hide-md-down { display: none; }
   .dash .insights { grid-template-columns: 1fr; }
 }
+
+/* ---------- live calendar views ---------- */
+.dash .view-tabs a.on { background: var(--surface-lowest); color: var(--on-surface); }
+.dash .mini-cal .days > * { border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+.dash button.check-box { border: 0; padding: 0; cursor: pointer; }
+.dash .slot { display: flex; flex-direction: column; gap: 4px; }
+.dash .slot > .chip { height: auto; flex: 1; }
+.dash .month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 1px; background: var(--surface-container); border-radius: 8px; overflow: hidden; }
+.dash .month-cell { min-height: 96px; padding: 4px; background: var(--surface-lowest); display: flex; flex-direction: column; gap: 4px; }
+.dash .month-cell.out { background: var(--surface-low); opacity: 0.5; }
+.dash .month-cell .today-badge { width: 24px; height: 24px; font-size: 13px; }
+.dash .agenda { display: flex; flex-direction: column; gap: 16px; max-width: 640px; }
+.dash .cal-error { padding: 8px; border-radius: 2px; background: #ffdad6; color: #410002; }
