@@ -1,9 +1,10 @@
 import { Fragment, useEffect, useState } from 'react'
 import { api } from './api.js'
 import {
-  addDays, completePatch, dayLabel, monthGrid, monthLabel, periodLabel, periodRange,
+  addDays, completePatch, dateKey, dayLabel, monthGrid, monthLabel, periodLabel, periodRange,
   daysIn, sameDay, shift, startOfDay, timeLabel, toItems,
 } from './calendar.js'
+import TasksPanel from './Tasks.jsx'
 import './Dashboard.css'
 
 const NAV_VIEWS = ['Month', 'Week', 'Day', 'Agenda']
@@ -33,16 +34,16 @@ const INSIGHTS = [
   },
 ]
 
-const REPEAT_OPTIONS = ['Daily', 'Weekly', 'Monthly', 'Custom']
-const WEEKDAYS = [
-  { l: 'M', on: true },
-  { l: 'T', on: true },
-  { l: 'W', on: true },
-  { l: 'T', on: true },
-  { l: 'F', on: true },
-  { l: 'S', on: false },
-  { l: 'S', on: false },
+const REPEAT_OPTIONS = ['daily', 'weekly', 'monthly']
+const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+const COLORS = [
+  { label: 'Purple', cls: 'sw-primary', value: '#9141f2' },
+  { label: 'Violet', cls: 'sw-secondary', value: '#914af6' },
+  { label: 'Grey', cls: 'sw-highest', value: '#dce2f7' },
+  { label: 'Dark', cls: 'sw-inverse', value: '#293040' },
 ]
+const SOURCES = ['events', 'assignments', 'tasks']
+const hhmm = (d) => d.toTimeString().slice(0, 5)
 
 function Icon({ name, size, className = '' }) {
   return (
@@ -60,7 +61,8 @@ const WEEK_DOW = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 // Maps an item to a chip kind relative to now.
 function cellFor(item, now) {
   const time = timeLabel(item.start)
-  const meta = item.end ? `${time} – ${timeLabel(item.end)}` : item.hours ? `${time} · ${item.hours}h` : time
+  const when = item.end ? `${time} – ${timeLabel(item.end)}` : item.hours ? `${time} · ${item.hours}h` : time
+  const meta = [when, ...item.tags.map((t) => `#${t}`)].join(' · ')
   const cell = { title: item.title, meta, routine: item.routine }
   if (item.done) return { ...cell, kind: sameDay(item.start, now) ? 'doneToday' : 'done' }
   if (item.start < addDays(startOfDay(now), 1)) {
@@ -152,19 +154,57 @@ function Chip({ cell, onToggle }) {
   }
 }
 
-function QuickAddModal({ onClose }) {
-  const [repeating, setRepeating] = useState(false)
-  const [freq, setFreq] = useState('Daily')
+// Create (no event) or edit an event; onSave/onDelete throw on API errors.
+function ActivityModal({ event, day, onClose, onSave, onDelete }) {
+  const [f, setF] = useState(() => {
+    const start = event ? new Date(event.startTime) : new Date(day.getFullYear(), day.getMonth(), day.getDate(), new Date().getHours() + 1)
+    const end = event ? new Date(event.endTime) : new Date(start.getTime() + 3600e3)
+    return {
+      title: event?.title ?? '', date: dateKey(start), start: hhmm(start), end: hhmm(end),
+      repeating: event?.type === 'routine', frequency: event?.frequency ?? 'daily', weekdays: event?.weekdays ?? [0, 1, 2, 3, 4],
+      color: event?.color || COLORS[0].value, tags: (event?.tags ?? []).map((t) => `#${t}`).join(', '),
+    }
+  })
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const set = (patch) => setF((old) => ({ ...old, ...patch }))
+  const toggleDay = (i) => set({ weekdays: f.weekdays.includes(i) ? f.weekdays.filter((d) => d !== i) : [...f.weekdays, i].sort() })
 
+  const run = async (action) => {
+    setBusy(true)
+    try {
+      await action()
+      onClose()
+    } catch (e) {
+      setError(e.message)
+      setBusy(false)
+    }
+  }
+
+  const submit = (e) => {
+    e.preventDefault()
+    const startTime = new Date(`${f.date}T${f.start}`)
+    const endTime = new Date(`${f.date}T${f.end}`)
+    if (endTime <= startTime) return setError('End time must be after start time.')
+    run(() =>
+      onSave({
+        title: f.title.trim(), startTime: startTime.toISOString(), endTime: endTime.toISOString(),
+        type: f.repeating ? 'routine' : 'onetime', frequency: f.frequency, weekdays: f.weekdays, color: f.color,
+        tags: f.tags.split(/[\s,]+/).map((t) => t.replace(/^#/, '')).filter(Boolean),
+      }),
+    )
+  }
+
+  const title = event ? 'Edit Activity' : 'Quick Add Activity'
   return (
     <div className="modal">
       <div className="modal-backdrop" onClick={onClose} />
-      <div className="modal-panel" role="dialog" aria-label="Quick Add Activity">
+      <form className="modal-panel" role="dialog" aria-label={title} onSubmit={submit}>
         <div className="col gap-lg">
           <div className="row between">
             <div className="row gap-xs">
-              <Icon name="post_add" size={24} className="primary" />
-              <span className="headline-sm">Quick Add Activity</span>
+              <Icon name={event ? 'edit_calendar' : 'post_add'} size={24} className="primary" />
+              <span className="headline-sm">{title}</span>
             </div>
             <button type="button" className="icon-btn round" aria-label="Close" onClick={onClose}>
               <Icon name="close" size={20} />
@@ -173,19 +213,16 @@ function QuickAddModal({ onClose }) {
 
           <div className="col gap-md">
             <div className="col gap-xs">
-              <label className="label-sm upper">Activity Frequency</label>
+              <span className="label-sm upper">Activity Frequency</span>
               <div className="seg">
-                <button
-                  type="button"
-                  className={!repeating ? 'seg-on' : ''}
-                  onClick={() => setRepeating(false)}
-                >
+                <button type="button" aria-pressed={!f.repeating} className={!f.repeating ? 'seg-on' : ''} onClick={() => set({ repeating: false })}>
                   One-Time
                 </button>
                 <button
                   type="button"
-                  className={`row center gap-1 ${repeating ? 'seg-on' : ''}`}
-                  onClick={() => setRepeating(true)}
+                  aria-pressed={f.repeating}
+                  className={`row center gap-1 ${f.repeating ? 'seg-on' : ''}`}
+                  onClick={() => set({ repeating: true })}
                 >
                   <Icon name="repeat" size={15} />
                   Repeating Routine
@@ -193,77 +230,117 @@ function QuickAddModal({ onClose }) {
               </div>
             </div>
 
-            <div className="col gap-xs">
-              <label className="label-sm">Activity Name</label>
+            <label className="col gap-xs">
+              <span className="label-sm">Activity Name</span>
               <input
                 className="field"
                 type="text"
+                required
+                value={f.title}
+                onChange={(e) => set({ title: e.target.value })}
                 placeholder="e.g. Core Strength Workout, Review Pitch"
               />
+            </label>
+
+            <div className="grid-3 gap-sm">
+              <label className="col gap-xs">
+                <span className="label-sm">{f.repeating ? 'Starts' : 'Date'}</span>
+                <input className="field" type="date" required value={f.date} onChange={(e) => set({ date: e.target.value })} />
+              </label>
+              <label className="col gap-xs">
+                <span className="label-sm">From</span>
+                <input className="field" type="time" required value={f.start} onChange={(e) => set({ start: e.target.value })} />
+              </label>
+              <label className="col gap-xs">
+                <span className="label-sm">To</span>
+                <input className="field" type="time" required value={f.end} onChange={(e) => set({ end: e.target.value })} />
+              </label>
             </div>
 
-            <div className="grid-2 gap-sm">
-              <div className="col gap-xs">
-                <label className="label-sm">Date</label>
-                <input className="field" type="date" defaultValue="2024-10-16" />
-              </div>
-              <div className="col gap-xs">
-                <label className="label-sm">Time</label>
-                <input className="field" type="time" defaultValue="14:30" />
-              </div>
-            </div>
-
-            {repeating && (
+            {f.repeating && (
               <div className="col gap-sm repeat-box">
-                <div className="row between">
-                  <span className="label-md">Repeat Rhythm</span>
-                  <span className="label-sm primary semibold">Active Engine</span>
-                </div>
+                <span className="label-md">Repeat Rhythm</span>
                 <div className="grid-4 label-sm">
                   {REPEAT_OPTIONS.map((o) => (
                     <button
                       key={o}
                       type="button"
-                      className={`freq ${freq === o ? 'freq-on' : ''}`}
-                      onClick={() => setFreq(o)}
+                      aria-pressed={f.frequency === o}
+                      className={`freq ${f.frequency === o ? 'freq-on' : ''}`}
+                      onClick={() => set({ frequency: o })}
                     >
-                      {o}
+                      {o[0].toUpperCase() + o.slice(1)}
                     </button>
                   ))}
                 </div>
-                <div className="row between weekdays">
-                  {WEEKDAYS.map((w, i) => (
-                    <button key={i} type="button" className={`wd ${w.on ? 'wd-on' : ''}`}>
-                      {w.l}
-                    </button>
-                  ))}
-                </div>
+                {f.frequency === 'weekly' && (
+                  <div className="row between weekdays">
+                    {WEEKDAYS.map((w, i) => (
+                      <button
+                        key={w}
+                        type="button"
+                        aria-label={w}
+                        aria-pressed={f.weekdays.includes(i)}
+                        className={`wd ${f.weekdays.includes(i) ? 'wd-on' : ''}`}
+                        onClick={() => toggleDay(i)}
+                      >
+                        {w[0]}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
             <div className="col gap-xs">
-              <label className="label-sm">Tag &amp; Color Anchor</label>
+              <span className="label-sm">Tag &amp; Color Anchor</span>
               <div className="row gap-sm">
-                <button type="button" className="swatch sw-primary selected" aria-label="Purple" />
-                <button type="button" className="swatch sw-secondary" aria-label="Violet" />
-                <button type="button" className="swatch sw-highest" aria-label="Grey" />
-                <button type="button" className="swatch sw-inverse" aria-label="Dark" />
-                <input className="field small grow" type="text" placeholder="Tag: #health, #work, #focus" />
+                {COLORS.map((c) => (
+                  <button
+                    key={c.value}
+                    type="button"
+                    aria-label={c.label}
+                    aria-pressed={f.color === c.value}
+                    className={`swatch ${c.cls} ${f.color === c.value ? 'selected' : ''}`}
+                    onClick={() => set({ color: c.value })}
+                  />
+                ))}
+                <input
+                  className="field small grow"
+                  type="text"
+                  aria-label="Tags"
+                  value={f.tags}
+                  onChange={(e) => set({ tags: e.target.value })}
+                  placeholder="Tag: #health, #work, #focus"
+                />
               </div>
             </div>
+            {error && <p className="cal-error" role="alert">{error}</p>}
           </div>
         </div>
 
         <div className="row gap-sm modal-footer">
-          <button type="button" className="btn btn-soft grow" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="button" className="btn btn-primary grow" onClick={onClose}>
+          {event ? (
+            <button
+              type="button"
+              className="btn btn-soft grow"
+              disabled={busy}
+              onClick={() => window.confirm(`Delete "${event.title}"${event.type === 'routine' ? ' and every repeat' : ''}?`) && run(onDelete)}
+            >
+              <Icon name="delete" size={16} />
+              <span>Delete</span>
+            </button>
+          ) : (
+            <button type="button" className="btn btn-soft grow" onClick={onClose}>
+              Cancel
+            </button>
+          )}
+          <button type="submit" className="btn btn-primary grow" disabled={busy}>
             <Icon name="check" size={16} />
-            <span>Schedule Activity</span>
+            <span>{event ? 'Save Changes' : 'Schedule Activity'}</span>
           </button>
         </div>
-      </div>
+      </form>
     </div>
   )
 }
@@ -360,31 +437,76 @@ function AgendaView({ items, renderItem }) {
 
 export default function Dashboard({ onSignOut }) {
   const [filter, setFilter] = useState('all')
-  const [modalOpen, setModalOpen] = useState(false)
+  const [modal, setModal] = useState(null) // null, {} to create, { event } to edit
   const [view, setView] = useState('Week')
   const [cursor, setCursor] = useState(() => new Date())
-  const [items, setItems] = useState([])
+  const [data, setData] = useState({ events: [], assignments: [], tasks: [] })
   const [error, setError] = useState('')
   const now = new Date()
 
   useEffect(() => {
     // shortcut: loads all docs once and filters client-side, add range queries when data grows
-    Promise.all(['/events', '/assignments', '/tasks'].map((p) => api(p)))
-      .then(([events, assignments, tasks]) => setItems(toItems(events, assignments, tasks)))
+    Promise.all(SOURCES.map((s) => api(`/${s}`)))
+      .then(([events, assignments, tasks]) => setData({ events, assignments, tasks }))
       .catch((e) => setError(`Couldn't load your calendar: ${e.message}`))
   }, [])
 
+  // Local doc cache: replace in place or append; drop by id.
+  const put = (source, doc) =>
+    setData((d) => {
+      const i = d[source].findIndex((x) => x.id === doc.id)
+      return { ...d, [source]: i < 0 ? [...d[source], doc] : d[source].with(i, doc) }
+    })
+  const drop = (source, id) => setData((d) => ({ ...d, [source]: d[source].filter((x) => x.id !== id) }))
+  const remove = async (source, id) => {
+    await api(`/${source}/${id}`, { method: 'DELETE' })
+    drop(source, id)
+  }
+  // Runs an API action, surfaces errors; resolves true on success.
+  const attempt = (fn) =>
+    fn().then(
+      () => true,
+      (e) => {
+        setError(e.message)
+        return false
+      },
+    )
+
   // Optimistic update, reverted if the save fails.
-  const toggle = async (item, done) => {
-    const set = (v) =>
-      setItems((list) => list.map((i) => (i.id === item.id && i.source === item.source ? { ...i, done: v } : i)))
-    set(done)
+  const patch = async (source, doc, changes, label = doc.title) => {
+    put(source, { ...doc, ...changes })
     try {
-      await api(`/${item.source}/${item.id}`, { method: 'PATCH', body: completePatch(item, done) })
+      await api(`/${source}/${doc.id}`, { method: 'PATCH', body: changes })
+      return true
     } catch (e) {
-      set(!done)
-      setError(`Couldn't save "${item.title}": ${e.message}`)
+      put(source, doc)
+      setError(`Couldn't save "${label}": ${e.message}`)
+      return false
     }
+  }
+
+  const saveEvent = async (body) => {
+    const { event } = modal
+    put('events', await api(event ? `/events/${event.id}` : '/events', { method: event ? 'PATCH' : 'POST', body }))
+  }
+
+  const tasks = {
+    onCreate: ({ title, dueDate }) =>
+      attempt(async () =>
+        put('tasks', await api('/tasks', { method: 'POST', body: { title, ...(dueDate && { dueDate: new Date(`${dueDate}T00:00`).toISOString() }) } })),
+      ),
+    onPatch: (task, changes) => patch('tasks', task, changes),
+    // Deletes the task's scheduled parts first so no orphans remain.
+    onDelete: (task) =>
+      attempt(async () => {
+        await Promise.all(data.assignments.filter((a) => a.taskId === task.id).map((a) => remove('assignments', a.id)))
+        await remove('tasks', task.id)
+      }),
+    onSchedule: (task, f) =>
+      attempt(async () => {
+        const body = { taskId: task.id, part: f.part, eventDate: new Date(`${f.date}T${f.time}`).toISOString(), hoursRequired: Number(f.hours) }
+        put('assignments', await api('/assignments', { method: 'POST', body }))
+      }),
   }
 
   const hide = (kind) =>
@@ -392,10 +514,24 @@ export default function Dashboard({ onSignOut }) {
     (filter === 'done' && kind === 'pending')
 
   const [start, end] = periodRange(view, cursor)
-  const visible = items.filter((i) => i.start >= start && i.start < end)
+  const visible = toItems(data, start, end)
   const renderItem = (item) => {
     const cell = cellFor(item, now)
-    return hide(cell.kind) ? null : <Chip key={`${item.source}/${item.id}`} cell={cell} onToggle={(v) => toggle(item, v)} />
+    if (hide(cell.kind)) return null
+    const isEvent = item.source === 'events'
+    return (
+      <div key={item.key} className="chip-wrap" style={item.color ? { '--chip-color': item.color } : undefined}>
+        <Chip cell={cell} onToggle={(v) => patch(item.source, item.doc, completePatch(item, v), item.title)} />
+        <button
+          type="button"
+          className="chip-edit"
+          aria-label={isEvent ? `Edit ${item.title}` : `Unschedule ${item.title}`}
+          onClick={() => (isEvent ? setModal({ event: item.doc }) : attempt(() => remove('assignments', item.id)))}
+        >
+          <Icon name={isEvent ? 'edit' : 'event_busy'} size={12} />
+        </button>
+      </div>
+    )
   }
   const viewProps = { items: visible, now, renderItem }
 
@@ -469,7 +605,7 @@ export default function Dashboard({ onSignOut }) {
 
       <aside className="sidebar">
         <div className="col gap-md">
-          <button type="button" className="btn btn-primary full" onClick={() => setModalOpen(true)}>
+          <button type="button" className="btn btn-primary full" onClick={() => setModal({})}>
             <Icon name="add" size={18} />
             <span>Create Activity</span>
           </button>
@@ -593,7 +729,7 @@ export default function Dashboard({ onSignOut }) {
                 </button>
               ))}
             </div>
-            <button type="button" className="btn btn-primary" onClick={() => setModalOpen(true)}>
+            <button type="button" className="btn btn-primary" onClick={() => setModal({})}>
               <Icon name="add_task" size={18} />
               <span>+ Quick Add Activity</span>
             </button>
@@ -626,6 +762,8 @@ export default function Dashboard({ onSignOut }) {
           )}
           {!visible.length && !error && <p className="body-sm muted">No activities in this period.</p>}
 
+          <TasksPanel tasks={data.tasks} {...tasks} />
+
           <div className="insights">
             {INSIGHTS.map((i) => (
               <div key={i.title} className="card row gap-sm start">
@@ -640,7 +778,15 @@ export default function Dashboard({ onSignOut }) {
         </div>
       </main>
 
-      {modalOpen && <QuickAddModal onClose={() => setModalOpen(false)} />}
+      {modal && (
+        <ActivityModal
+          event={modal.event}
+          day={cursor}
+          onClose={() => setModal(null)}
+          onSave={saveEvent}
+          onDelete={() => remove('events', modal.event.id)}
+        />
+      )}
     </div>
   )
 }

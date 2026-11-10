@@ -43,3 +43,17 @@ def test_get_user_rejects_invalid_token(monkeypatch):
     with pytest.raises(HTTPException) as e:
         deps.get_user(CREDS)
     assert e.value.status_code == 401
+
+
+def test_event_repeat_fields_validated():
+    base = {"title": "x", "startTime": "2026-01-01T10:00:00Z", "endTime": "2026-01-01T11:00:00Z"}
+    assert Event(**base, frequency="weekly", weekdays=[0, 6]).weekdays == [0, 6]
+    for bad in [{"weekdays": [7]}, {"frequency": "hourly"}, {"completedDates": ["2026-1-1"]}]:
+        with pytest.raises(ValidationError):
+            Event(**base, **bad)
+
+
+def test_subtasks_are_typed():
+    assert Task(title="x", subTasks=[{"title": "a"}]).subTasks[0].done is False
+    with pytest.raises(ValidationError):
+        Task(title="x", subTasks=["a"])

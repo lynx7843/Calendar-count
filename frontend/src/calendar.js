@@ -44,20 +44,56 @@ export function periodLabel(view, cursor) {
   return `${fmt(start, short)} – ${fmt(addDays(end, -1), { ...short, year: 'numeric' })}`
 }
 
-// Events and task assignments as one sorted list of calendar items.
-export function toItems(events, assignments, tasks) {
-  const titles = Object.fromEntries(tasks.map((t) => [t.id, t.title]))
-  return [
-    ...events.map((e) => ({
-      id: e.id, source: 'events', title: e.title, start: new Date(e.startTime), end: new Date(e.endTime),
-      routine: e.type === 'routine', done: !!e.completed,
-    })),
-    ...assignments.map((a) => ({
-      id: a.id, source: 'assignments', title: titles[a.taskId] ?? 'Task', start: new Date(a.eventDate),
-      hours: a.hoursRequired, routine: false, done: a.status === 'done',
-    })),
-  ].sort((a, b) => a.start - b.start)
+export const dateKey = (d) =>
+  [d.getFullYear(), d.getMonth() + 1, d.getDate()].map((n) => String(n).padStart(2, '0')).join('-')
+const weekday = (d) => (d.getDay() + 6) % 7 // 0 = Monday
+
+// Start times of an event within [start, end); routines repeat from their first day.
+export function occurrences(e, start, end) {
+  const first = new Date(e.startTime)
+  if (e.type !== 'routine') return first >= start && first < end ? [first] : []
+  const days = e.weekdays?.length ? e.weekdays : [weekday(first)]
+  const rules = {
+    daily: () => true,
+    weekly: (d) => days.includes(weekday(d)),
+    monthly: (d) => d.getDate() === first.getDate(), // skips months without that day
+  }
+  return daysIn(startOfDay(first > start ? first : start), end)
+    .filter(rules[e.frequency] ?? rules.daily)
+    .map((d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), first.getHours(), first.getMinutes()))
 }
 
-export const completePatch = (item, done) =>
-  item.source === 'events' ? { completed: done } : { status: done ? 'done' : 'pending' }
+// Events (expanded) and task assignments in [start, end) as one sorted list.
+export function toItems({ events, assignments, tasks }, start, end) {
+  const titles = Object.fromEntries(tasks.map((t) => [t.id, t.title]))
+  const eventItems = events.flatMap((e) =>
+    occurrences(e, start, end).map((s) => {
+      const day = dateKey(s)
+      const routine = e.type === 'routine'
+      return {
+        id: e.id, source: 'events', key: `events/${e.id}/${day}`, doc: e, day, title: e.title, start: s,
+        end: new Date(s.getTime() + (new Date(e.endTime) - new Date(e.startTime))),
+        routine, color: e.color, tags: e.tags ?? [],
+        done: routine ? (e.completedDates ?? []).includes(day) : !!e.completed,
+      }
+    }),
+  )
+  const assignmentItems = assignments
+    .map((a) => {
+      const title = titles[a.taskId] ?? 'Task'
+      return {
+        id: a.id, source: 'assignments', key: `assignments/${a.id}`, doc: a, title: a.part ? `${title} · ${a.part}` : title,
+        start: new Date(a.eventDate), hours: a.hoursRequired, routine: false, tags: [], done: a.status === 'done',
+      }
+    })
+    .filter((i) => i.start >= start && i.start < end)
+  return [...eventItems, ...assignmentItems].sort((a, b) => a.start - b.start)
+}
+
+// Routines track completion per day; everything else has one flag.
+export function completePatch(item, done) {
+  if (item.source === 'assignments') return { status: done ? 'done' : 'pending' }
+  if (!item.routine) return { completed: done }
+  const dates = (item.doc.completedDates ?? []).filter((d) => d !== item.day)
+  return { completedDates: done ? [...dates, item.day] : dates }
+}

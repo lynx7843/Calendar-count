@@ -75,3 +75,17 @@ def test_user_profile(client):
 def test_user_without_email(client, user):
     del user["email"]
     assert client.put("/users/me", json={"name": "Alex"}).status_code == 400
+
+
+def test_routine_completion_and_subtasks(client):
+    routine = {"title": "Run", "startTime": "2026-01-01T07:00:00Z", "endTime": "2026-01-01T08:00:00Z",
+               "type": "routine", "frequency": "weekly", "weekdays": [0, 2], "tags": ["health"]}
+    event_id = client.post("/events", json=routine).json()["id"]
+    done = client.patch(f"/events/{event_id}", json={"completedDates": ["2026-01-05"]}).json()
+    assert done["completedDates"] == ["2026-01-05"] and done["weekdays"] == [0, 2]
+
+    task_id = client.post("/tasks", json=TASK).json()["id"]
+    parts = client.patch(f"/tasks/{task_id}", json={"subTasks": [{"title": "Outline"}]}).json()
+    assert parts["subTasks"] == [{"title": "Outline", "done": False}]
+    a = client.post("/assignments", json={"taskId": task_id, "eventDate": "2026-01-02T09:00:00Z", "part": "Outline"})
+    assert a.status_code == 201 and a.json()["assignedTo"] == ""

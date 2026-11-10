@@ -18,6 +18,10 @@ const setup = async () => {
   await act(() => Promise.resolve())
 }
 const click = (name) => fireEvent.click(screen.getByRole('button', { name }))
+const type = (label, value) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
+const flush = () => act(() => Promise.resolve())
+// Echoes writes back as saved docs, like the API does.
+const echo = (path, opts) => Promise.resolve(opts ? (opts.method === 'DELETE' ? null : { id: 'new', ...opts.body }) : DATA[path])
 
 beforeEach(() => {
   vi.useFakeTimers({ now: NOW, toFake: ['Date'] })
@@ -73,5 +77,130 @@ describe('calendar', () => {
     api.mockRejectedValue(new Error('offline'))
     await setup()
     expect(screen.getByRole('alert').textContent).toContain('offline')
+  })
+})
+
+describe('activities', () => {
+  beforeEach(() => {
+    api.mockImplementation(echo)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+  })
+
+  it('creates a weekly routine with color and tags', async () => {
+    await setup()
+    click(/Quick Add Activity/)
+    type('Activity Name', 'Yoga')
+    fireEvent.change(screen.getByLabelText('Date'), { target: { value: '2026-11-09' } })
+    type('From', '07:00')
+    type('To', '08:00')
+    click(/Repeating Routine/)
+    click('Weekly')
+    ;['Tuesday', 'Thursday', 'Friday'].forEach(click) // leaves Mon + Wed on
+    click('Dark')
+    type('Tags', '#health, focus')
+    click(/Schedule Activity/)
+    await flush()
+    expect(api).toHaveBeenCalledWith('/events', {
+      method: 'POST',
+      body: expect.objectContaining({ title: 'Yoga', type: 'routine', frequency: 'weekly', weekdays: [0, 2], color: '#293040', tags: ['health', 'focus'] }),
+    })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getAllByText('Yoga').length).toBe(2) // Mon 9 and Wed 11
+  })
+
+  it('rejects end before start', async () => {
+    await setup()
+    click(/Quick Add Activity/)
+    type('Activity Name', 'X')
+    type('From', '10:00')
+    type('To', '09:00')
+    click(/Schedule Activity/)
+    expect(screen.getByRole('alert').textContent).toContain('End time')
+    expect(api).toHaveBeenCalledTimes(3) // only the initial loads
+  })
+
+  it('edits and deletes an event', async () => {
+    await setup()
+    click('Edit Dentist')
+    type('Activity Name', 'Dentist checkup')
+    click(/Save Changes/)
+    await flush()
+    expect(api).toHaveBeenCalledWith('/events/e1', { method: 'PATCH', body: expect.objectContaining({ title: 'Dentist checkup' }) })
+    expect(screen.getByText('Dentist checkup')).toBeTruthy()
+    click('Edit Dentist checkup')
+    click(/^delete ?Delete$/)
+    await flush()
+    expect(api).toHaveBeenLastCalledWith('/events/new', { method: 'DELETE' })
+    expect(screen.queryByText('Dentist checkup')).toBeNull()
+  })
+
+  it('completes one routine day without touching others', async () => {
+    const run = { id: 'r1', title: 'Run', startTime: at(7), endTime: at(8), type: 'routine', frequency: 'daily', completedDates: [] }
+    api.mockImplementation((path, opts) => (path === '/events' && !opts ? Promise.resolve([run]) : echo(path, opts)))
+    await setup()
+    fireEvent.click(screen.getAllByLabelText('Complete Run')[0])
+    await flush()
+    expect(api).toHaveBeenCalledWith('/events/r1', { method: 'PATCH', body: { completedDates: ['2026-11-11'] } })
+    expect(screen.queryAllByLabelText('Complete Run')).toHaveLength(0) // Wed done; Thu-Sun are future
+  })
+})
+
+describe('tasks', () => {
+  beforeEach(() => {
+    api.mockImplementation(echo)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+  })
+
+  it('creates a task, adds a part and schedules it on the calendar', async () => {
+    await setup()
+    type('New task title', 'Thesis')
+    click('Add task')
+    await flush()
+    expect(api).toHaveBeenCalledWith('/tasks', { method: 'POST', body: { title: 'Thesis' } })
+
+    type('New part for Thesis', 'Outline')
+    click('Add part')
+    await flush()
+    expect(api).toHaveBeenCalledWith('/tasks/new', { method: 'PATCH', body: { subTasks: [{ title: 'Outline', done: false }] } })
+    expect(screen.getByText('0/1 parts done')).toBeTruthy()
+
+    fireEvent.change(screen.getByLabelText('Part'), { target: { value: 'Outline' } })
+    type('Day', '2026-11-12')
+    type('Hours', '2')
+    click('Schedule')
+    await flush()
+    expect(api).toHaveBeenCalledWith('/assignments', {
+      method: 'POST',
+      body: { taskId: 'new', part: 'Outline', eventDate: new Date(2026, 10, 12, 9).toISOString(), hoursRequired: 2 },
+    })
+    expect(screen.getByText('Thesis · Outline')).toBeTruthy()
+
+    fireEvent.click(screen.getByLabelText('Outline'))
+    await flush()
+    expect(screen.getByText('1/1 parts done')).toBeTruthy()
+  })
+
+  it('deleting a task removes its scheduled parts', async () => {
+    DATA['/tasks'] = [{ id: 't1', title: 'Thesis', subTasks: [] }]
+    DATA['/assignments'] = [{ id: 'a1', taskId: 't1', eventDate: at(16), hoursRequired: 1, status: 'pending' }]
+    await setup()
+    expect(screen.getByText('Thesis', { selector: '.chip-title' })).toBeTruthy()
+    click('Delete Thesis')
+    await flush()
+    expect(api).toHaveBeenCalledWith('/assignments/a1', { method: 'DELETE' })
+    expect(api).toHaveBeenLastCalledWith('/tasks/t1', { method: 'DELETE' })
+    expect(screen.queryByText('Thesis')).toBeNull()
+    DATA['/tasks'] = []
+    DATA['/assignments'] = []
+  })
+
+  it('keeps form input when the save fails', async () => {
+    await setup()
+    api.mockRejectedValueOnce(new Error('offline'))
+    type('New task title', 'Thesis')
+    click('Add task')
+    await flush()
+    expect(screen.getByRole('alert').textContent).toContain('offline')
+    expect(screen.getByLabelText('New task title').value).toBe('Thesis')
   })
 })
