@@ -388,3 +388,18 @@
 .dash .month-cell .today-badge { width: 24px; height: 24px; font-size: 13px; }
 .dash .agenda { display: flex; flex-direction: column; gap: 16px; max-width: 640px; }
 .dash .cal-error { padding: 8px; border-radius: 2px; background: #ffdad6; color: #410002; }
+
+/* ---------- activities and tasks ---------- */
+.dash .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); }
+.dash .grid-3 .field { padding: 8px; }
+.dash .chip-wrap { position: relative; display: flex; flex-direction: column; border-left: 3px solid var(--chip-color, transparent); }
+.dash .slot > .chip-wrap { flex: 1; }
+.dash .chip-wrap > .chip { flex: 1; height: auto; }
+.dash .chip-edit {
+  position: absolute; right: 2px; bottom: 2px; padding: 2px; border: 0; border-radius: 2px;
+  background: var(--surface-lowest); color: var(--on-surface-variant); opacity: 0.6; cursor: pointer; line-height: 0;
+}
+.dash .chip-wrap:hover .chip-edit, .dash .chip-edit:focus-visible { opacity: 1; }
+.dash .task-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.dash .struck { text-decoration: line-through; color: var(--on-surface-variant); }
+.dash button:disabled { opacity: 0.6; cursor: wait; }
