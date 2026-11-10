@@ -4,6 +4,7 @@ import {
   addDays, completePatch, dateKey, dayLabel, monthGrid, monthLabel, periodLabel, periodRange,
   daysIn, sameDay, shift, startOfDay, timeLabel, toItems,
 } from './calendar.js'
+import { completion, dayProgress, pct, streak } from './stats.js'
 import TasksPanel from './Tasks.jsx'
 import './Dashboard.css'
 
@@ -16,24 +17,6 @@ const FILTERS = [
   { icon: 'history', label: 'Completed History' },
 ]
 
-const INSIGHTS = [
-  {
-    icon: 'inventory_2',
-    title: 'Non-destructive Completed State',
-    text: 'Finished routines fade and show a strikethrough cut-off instead of disappearing, preserving your full historical rhythm without visual clutter.',
-  },
-  {
-    icon: 'published_with_changes',
-    title: 'Auto-Roll Routine Engine',
-    text: '5 recurring habits auto-populated for tomorrow. Missed activities do not break your streak if marked completed before midnight.',
-  },
-  {
-    icon: 'military_tech',
-    title: 'Milestone Count: 250 Total',
-    text: 'Only 3 more activities needed today to cross the 250 lifetime completed items milestone badge.',
-  },
-]
-
 const REPEAT_OPTIONS = ['daily', 'weekly', 'monthly']
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 const COLORS = [
@@ -42,7 +25,7 @@ const COLORS = [
   { label: 'Grey', cls: 'sw-highest', value: '#dce2f7' },
   { label: 'Dark', cls: 'sw-inverse', value: '#293040' },
 ]
-const SOURCES = ['events', 'assignments', 'tasks']
+const SOURCES = ['events', 'assignments', 'tasks', 'progress']
 const hhmm = (d) => d.toTimeString().slice(0, 5)
 
 function Icon({ name, size, className = '' }) {
@@ -346,11 +329,10 @@ function ActivityModal({ event, day, onClose, onSave, onDelete }) {
 }
 
 function dayStat(items, d, now) {
-  const list = items.filter((i) => sameDay(i.start, d))
-  const done = list.filter((i) => i.done).length
-  if (!list.length) return ''
-  if (sameDay(d, now)) return `${done}/${list.length} Done`
-  return d < now ? `${Math.round((done / list.length) * 100)}%` : `${done}/${list.length}`
+  const s = dayProgress(items, d)
+  if (!s.total) return ''
+  if (sameDay(d, now)) return `${s.done}/${s.total} Done`
+  return d < now ? `${pct(s)}%` : `${s.done}/${s.total}`
 }
 
 // Week and Day views: one row per hour that has items.
@@ -440,14 +422,14 @@ export default function Dashboard({ onSignOut }) {
   const [modal, setModal] = useState(null) // null, {} to create, { event } to edit
   const [view, setView] = useState('Week')
   const [cursor, setCursor] = useState(() => new Date())
-  const [data, setData] = useState({ events: [], assignments: [], tasks: [] })
+  const [data, setData] = useState({ events: [], assignments: [], tasks: [], progress: [] })
   const [error, setError] = useState('')
   const now = new Date()
 
   useEffect(() => {
     // shortcut: loads all docs once and filters client-side, add range queries when data grows
     Promise.all(SOURCES.map((s) => api(`/${s}`)))
-      .then(([events, assignments, tasks]) => setData({ events, assignments, tasks }))
+      .then(([events, assignments, tasks, progress]) => setData({ events, assignments, tasks, progress }))
       .catch((e) => setError(`Couldn't load your calendar: ${e.message}`))
   }, [])
 
@@ -496,11 +478,17 @@ export default function Dashboard({ onSignOut }) {
         put('tasks', await api('/tasks', { method: 'POST', body: { title, ...(dueDate && { dueDate: new Date(`${dueDate}T00:00`).toISOString() }) } })),
       ),
     onPatch: (task, changes) => patch('tasks', task, changes),
-    // Deletes the task's scheduled parts first so no orphans remain.
+    // Deletes the task's scheduled parts and progress log first so no orphans remain.
     onDelete: (task) =>
       attempt(async () => {
-        await Promise.all(data.assignments.filter((a) => a.taskId === task.id).map((a) => remove('assignments', a.id)))
+        const owned = ['assignments', 'progress'].flatMap((s) => data[s].filter((d) => d.taskId === task.id).map((d) => remove(s, d.id)))
+        await Promise.all(owned)
         await remove('tasks', task.id)
+      }),
+    onLog: (task, f) =>
+      attempt(async () => {
+        const body = { taskId: task.id, date: new Date(`${f.date}T00:00`).toISOString(), hoursWorked: Number(f.hours), workDone: f.workDone, nextSteps: f.nextSteps }
+        put('progress', await api('/progress', { method: 'POST', body }))
       }),
     onSchedule: (task, f) =>
       attempt(async () => {
@@ -535,10 +523,38 @@ export default function Dashboard({ onSignOut }) {
   }
   const viewProps = { items: visible, now, renderItem }
 
+  const shown = { done: visible.filter((i) => i.done).length, total: visible.length }
   const filterButtons = [
     { id: 'all', label: 'All Activities' },
-    { id: 'pending', label: 'Pending (3)' },
-    { id: 'done', label: 'Done (6)' },
+    { id: 'pending', label: `Pending (${shown.total - shown.done})` },
+    { id: 'done', label: `Done (${shown.done})` },
+  ]
+
+  // shortcut: re-expands a year of items each render, memoize if it gets slow
+  const today = startOfDay(now)
+  const history = toItems(data, addDays(today, -365), addDays(today, 1))
+  const todayStats = dayProgress(history, now)
+  const todayPct = pct(todayStats)
+  const missedToday = history.some((i) => sameDay(i.start, now) && i.start < now && !i.done)
+  const streakDays = streak(history, now)
+  const month = completion(history.filter((i) => i.start >= addDays(today, -29)), now)
+  const tomorrowRoutines = toItems(data, addDays(today, 1), addDays(today, 2)).filter((i) => i.routine).length
+  const insights = [
+    {
+      icon: 'inventory_2',
+      title: 'Non-destructive Completed State',
+      text: 'Finished routines fade and show a strikethrough cut-off instead of disappearing, preserving your full historical rhythm without visual clutter.',
+    },
+    {
+      icon: 'published_with_changes',
+      title: 'Auto-Roll Routine Engine',
+      text: `${tomorrowRoutines} recurring ${tomorrowRoutines === 1 ? 'habit' : 'habits'} scheduled for tomorrow. Each day of a routine is tracked on its own.`,
+    },
+    {
+      icon: 'military_tech',
+      title: `30-Day Completion: ${pct(month)}%`,
+      text: `${month.done} of ${month.total} activities that have started in the last 30 days are done.`,
+    },
   ]
 
   return (
@@ -664,12 +680,12 @@ export default function Dashboard({ onSignOut }) {
         <div className="rhythm col gap-xs">
           <div className="row between">
             <span className="label-md">Daily Rhythm</span>
-            <span className="label-sm primary bold">12/15 done</span>
+            <span className="label-sm primary bold">{todayStats.done}/{todayStats.total} done</span>
           </div>
           <div className="bar">
-            <div style={{ width: '80%' }} />
+            <div style={{ width: `${todayPct}%` }} />
           </div>
-          <span className="body-sm muted">80% completed for today</span>
+          <span className="body-sm muted">{todayStats.total ? `${todayPct}% completed for today` : 'Nothing scheduled today'}</span>
         </div>
       </aside>
 
@@ -685,19 +701,19 @@ export default function Dashboard({ onSignOut }) {
                   />
                   <path
                     className="ring-fg"
-                    strokeDasharray="67, 100"
+                    strokeDasharray={`${todayPct}, 100`}
                     d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                   />
                 </svg>
-                <span className="ring-label">67%</span>
+                <span className="ring-label">{todayPct}%</span>
               </div>
               <div className="col">
                 <div className="row gap-xs">
-                  <span className="headline-sm">Today: 6 of 9 Activities Done</span>
-                  <span className="pill">On Track</span>
+                  <span className="headline-sm">Today: {todayStats.done} of {todayStats.total} Activities Done</span>
+                  <span className="pill">{missedToday ? 'Catch Up' : 'On Track'}</span>
                 </div>
                 <div className="bar bar-wide">
-                  <div style={{ width: '67%' }} />
+                  <div style={{ width: `${todayPct}%` }} />
                 </div>
               </div>
             </div>
@@ -709,8 +725,8 @@ export default function Dashboard({ onSignOut }) {
               <div className="col">
                 <span className="label-sm upper muted">Consistency Rhythm</span>
                 <div className="row gap-xs baseline">
-                  <span className="numeric">14</span>
-                  <span className="body-md-medium muted">Days Streak</span>
+                  <span className="numeric">{streakDays}</span>
+                  <span className="body-md-medium muted">{streakDays === 1 ? 'Day' : 'Days'} Streak</span>
                 </div>
               </div>
             </div>
@@ -762,10 +778,10 @@ export default function Dashboard({ onSignOut }) {
           )}
           {!visible.length && !error && <p className="body-sm muted">No activities in this period.</p>}
 
-          <TasksPanel tasks={data.tasks} {...tasks} />
+          <TasksPanel tasks={data.tasks} progress={data.progress} {...tasks} />
 
           <div className="insights">
-            {INSIGHTS.map((i) => (
+            {insights.map((i) => (
               <div key={i.title} className="card row gap-sm start">
                 <span className="material-symbols-outlined insight-icon">{i.icon}</span>
                 <div className="col">
