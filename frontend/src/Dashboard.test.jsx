@@ -11,6 +11,7 @@ const DATA = {
   '/events': [{ id: 'e1', title: 'Dentist', startTime: at(14), endTime: at(15), type: 'onetime' }],
   '/assignments': [],
   '/tasks': [],
+  '/progress': [],
 }
 
 const setup = async () => {
@@ -116,7 +117,7 @@ describe('activities', () => {
     type('To', '09:00')
     click(/Schedule Activity/)
     expect(screen.getByRole('alert').textContent).toContain('End time')
-    expect(api).toHaveBeenCalledTimes(3) // only the initial loads
+    expect(api).toHaveBeenCalledTimes(4) // only the initial loads
   })
 
   it('edits and deletes an event', async () => {
@@ -202,5 +203,44 @@ describe('tasks', () => {
     await flush()
     expect(screen.getByRole('alert').textContent).toContain('offline')
     expect(screen.getByLabelText('New task title').value).toBe('Thesis')
+  })
+})
+
+describe('progress', () => {
+  beforeEach(() => api.mockImplementation(echo))
+
+  it('shows real today, streak, completion and filter counts', async () => {
+    const run = { id: 'r1', title: 'Run', type: 'routine', frequency: 'daily', completedDates: ['2026-11-09', '2026-11-10', '2026-11-11'],
+      startTime: new Date(2026, 10, 9, 7).toISOString(), endTime: new Date(2026, 10, 9, 8).toISOString() }
+    api.mockImplementation((path, opts) => (path === '/events' && !opts ? Promise.resolve([...DATA['/events'], run]) : echo(path, opts)))
+    await setup()
+    // Today: Run done at 7, Dentist pending at 14; Mon+Tue fully done.
+    expect(screen.getByText('Today: 1 of 2 Activities Done')).toBeTruthy()
+    expect(screen.getByText('1/2 done')).toBeTruthy()
+    expect(screen.getByText('50%')).toBeTruthy()
+    expect(screen.getByText('On Track')).toBeTruthy()
+    expect(screen.getByText('2', { selector: '.numeric' })).toBeTruthy() // Mon + Tue; unfinished today is skipped
+    expect(screen.getByText('30-Day Completion: 100%')).toBeTruthy()
+    expect(screen.getByText('1 recurring habit scheduled for tomorrow. Each day of a routine is tracked on its own.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Pending (5)' })).toBeTruthy() // Dentist + Run Thu-Sun
+    expect(screen.getByRole('button', { name: 'Done (3)' })).toBeTruthy()
+  })
+
+  it('logs hours, work done and next steps on a task', async () => {
+    DATA['/tasks'] = [{ id: 't1', title: 'Thesis', subTasks: [] }]
+    await setup()
+    expect(screen.getByText('Progress · 0h logged')).toBeTruthy()
+    type('Hours worked', '3')
+    type('Work done', 'Drafted intro')
+    type('Next steps', 'Find sources')
+    click('Log progress')
+    await flush()
+    expect(api).toHaveBeenCalledWith('/progress', {
+      method: 'POST',
+      body: { taskId: 't1', date: new Date(2026, 10, 11).toISOString(), hoursWorked: 3, workDone: 'Drafted intro', nextSteps: 'Find sources' },
+    })
+    expect(screen.getByText('Progress · 3h logged')).toBeTruthy()
+    expect(screen.getByText('Next: Find sources', { exact: false })).toBeTruthy()
+    DATA['/tasks'] = []
   })
 })

@@ -1,3 +1,5 @@
+import { dateKey } from './calendar.js'
+
 // Handlers resolve true on success; forms reset only then, so input survives errors.
 const onForm = (handler) => async (e) => {
   e.preventDefault()
@@ -5,8 +7,35 @@ const onForm = (handler) => async (e) => {
   if (await handler(Object.fromEntries(new FormData(form)))) form.reset()
 }
 
-function TaskCard({ task, onPatch, onDelete, onSchedule }) {
+const shortDate = (d) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+
+function ProgressLog({ task, entries, onLog }) {
+  const hours = entries.reduce((sum, p) => sum + p.hoursWorked, 0)
+  return (
+    <details className="col gap-xs">
+      <summary className="label-sm semibold">Progress · {hours}h logged</summary>
+      {entries.slice(0, 3).map((p) => (
+        <p key={p.id} className="body-sm">
+          <span className="semibold">{shortDate(p.date)} · {p.hoursWorked}h</span> {p.workDone}
+          {p.nextSteps && <span className="muted"> Next: {p.nextSteps}</span>}
+        </p>
+      ))}
+      <form className="col gap-xs" onSubmit={onForm((f) => onLog(task, f))} aria-label={`Log progress for ${task.title}`}>
+        <div className="row gap-xs">
+          <input className="field small" name="date" type="date" required defaultValue={dateKey(new Date())} aria-label="Worked on" />
+          <input className="field small" name="hours" type="number" min="0" step="1" defaultValue="1" required aria-label="Hours worked" />
+        </div>
+        <input className="field small" name="workDone" required placeholder="What did you get done?" aria-label="Work done" />
+        <input className="field small" name="nextSteps" placeholder="Next steps (optional)" aria-label="Next steps" />
+        <button type="submit" className="btn btn-soft">Log progress</button>
+      </form>
+    </details>
+  )
+}
+
+function TaskCard({ task, progress, onPatch, onDelete, onSchedule, onLog }) {
   const parts = task.subTasks ?? []
+  const entries = progress.filter((p) => p.taskId === task.id).sort((a, b) => new Date(b.date) - new Date(a.date))
   const done = parts.filter((p) => p.done).length
   const setParts = (list) => onPatch(task, { subTasks: list })
 
@@ -17,7 +46,7 @@ function TaskCard({ task, onPatch, onDelete, onSchedule }) {
           <span className="label-md">{task.title}</span>
           <span className="label-sm muted">
             {parts.length ? `${done}/${parts.length} parts done` : 'No parts yet'}
-            {task.dueDate && ` · due ${new Date(task.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
+            {task.dueDate && ` · due ${shortDate(task.dueDate)}`}
           </span>
         </div>
         <button
@@ -54,6 +83,8 @@ function TaskCard({ task, onPatch, onDelete, onSchedule }) {
         <input className="field small" name="hours" type="number" min="1" step="1" defaultValue="1" required aria-label="Hours" />
         <button type="submit" className="btn btn-soft">Schedule</button>
       </form>
+
+      <ProgressLog task={task} entries={entries} onLog={onLog} />
     </div>
   )
 }
