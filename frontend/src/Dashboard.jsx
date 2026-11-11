@@ -427,6 +427,7 @@ export default function Dashboard({ onSignOut }) {
   const [cursor, setCursor] = useState(() => new Date())
   const [data, setData] = useState({ events: [], assignments: [], tasks: [], progress: [] })
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
   const now = new Date()
 
   useEffect(() => {
@@ -434,6 +435,7 @@ export default function Dashboard({ onSignOut }) {
     Promise.all(SOURCES.map((s) => api(`/${s}`)))
       .then(([events, assignments, tasks, progress]) => setData({ events, assignments, tasks, progress }))
       .catch((e) => setError(`Couldn't load your calendar: ${e.message}`))
+      .finally(() => setLoading(false))
     // Optional: no profile yet (404) just keeps the default view.
     api('/users/me')
       .then((u) => VIEWS.includes(u?.preferences?.defaultView) && setView(u.preferences.defaultView))
@@ -798,7 +800,11 @@ export default function Dashboard({ onSignOut }) {
               <TimeGrid days={view === 'Day' ? [startOfDay(cursor)] : daysIn(start, end)} {...viewProps} />
             </div>
           )}
-          {!visible.length && !error && <p className="body-sm muted">No activities in this period.</p>}
+          {loading ? (
+            <p className="body-sm muted" role="status">Loading your calendar…</p>
+          ) : (
+            !visible.length && !error && <p className="body-sm muted">No activities in this period.</p>
+          )}
 
           <TasksPanel tasks={data.tasks} progress={data.progress} {...tasks} />
 
