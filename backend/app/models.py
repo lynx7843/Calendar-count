@@ -11,29 +11,37 @@ class Doc(BaseModel):
 Weekday = Annotated[int, Field(ge=0, le=6)]  # 0 = Monday
 DateKey = Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")]
 
+# Size caps keep docs far below Firestore's 1 MiB limit.
+Short = Annotated[str, Field(max_length=200)]
+Long = Annotated[str, Field(max_length=5000)]
+Tag = Annotated[str, Field(max_length=50)]
+Tags = Annotated[list[Tag], Field(max_length=20)]
+Hours = Annotated[int, Field(ge=0, le=24)]
+
 
 class User(Doc):
-    name: str
-    avatar: str = ""
-    preferences: dict = {}
-    tags: list[str] = []
+    name: Short
+    avatar: Annotated[str, Field(max_length=2000)] = ""  # URL
+    preferences: Annotated[dict[Tag, Short | int | float | bool | None], Field(max_length=20)] = {}
+    tags: Tags = []
     completionRate: float = Field(0, ge=0, le=1)
     lastLogin: datetime | None = None
 
 
 class Event(Doc):
-    title: str
-    description: str = ""
+    title: Short
+    description: Long = ""
     startTime: datetime
     endTime: datetime
-    type: str = "onetime"
-    color: str = ""
-    tags: list[str] = []
+    type: Short = "onetime"
+    color: Annotated[str, Field(max_length=20)] = ""
+    tags: Tags = []
     completed: bool = False
     # Routine repeat rule; weekdays only apply to weekly.
     frequency: Literal["daily", "weekly", "monthly"] = "daily"
-    weekdays: list[Weekday] = []
-    completedDates: list[DateKey] = []  # done routine days, local YYYY-MM-DD
+    weekdays: Annotated[list[Weekday], Field(max_length=7)] = []
+    # shortcut: ~10 years of daily completions, archive old dates if a routine outlives it
+    completedDates: Annotated[list[DateKey], Field(max_length=4000)] = []  # done routine days, local YYYY-MM-DD
 
     @model_validator(mode="after")
     def check_times(self):
@@ -43,33 +51,33 @@ class Event(Doc):
 
 
 class SubTask(Doc):
-    title: str
+    title: Short
     done: bool = False
 
 
 class Task(Doc):
-    title: str
-    description: str = ""
-    status: str = "pending"
-    priority: str = "medium"
+    title: Short
+    description: Long = ""
+    status: Short = "pending"
+    priority: Short = "medium"
     dueDate: datetime | None = None
-    subTasks: list[SubTask] = []
+    subTasks: Annotated[list[SubTask], Field(max_length=100)] = []
 
 
 class Progress(Doc):
-    taskId: str
+    taskId: Short
     date: datetime
-    hoursWorked: int = Field(0, ge=0)
-    workDone: str = ""
-    nextSteps: str = ""
+    hoursWorked: Hours = 0
+    workDone: Long = ""
+    nextSteps: Long = ""
     completed: bool = False
 
 
 class Assignment(Doc):
-    taskId: str
+    taskId: Short
     eventDate: datetime
-    assignedTo: str = ""
-    part: str = ""  # subtask title this slot works on
-    hoursRequired: int = Field(0, ge=0)
-    status: str = "pending"
-    eventRef: str = ""
+    assignedTo: Short = ""
+    part: Short = ""  # subtask title this slot works on
+    hoursRequired: Hours = 0
+    status: Short = "pending"
+    eventRef: Short = ""
