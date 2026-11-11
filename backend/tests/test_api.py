@@ -105,3 +105,10 @@ def test_missing_credentials_is_503_with_cors(client):
     assert res.status_code == 503
     assert "GOOGLE_APPLICATION_CREDENTIALS" in res.json()["detail"]
     assert res.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_oversized_patch_is_rejected(client):
+    task_id = client.post("/tasks", json=TASK).json()["id"]
+    res = client.patch(f"/tasks/{task_id}", json={"title": "a" * 201})
+    assert res.status_code == 422
+    assert client.get(f"/tasks/{task_id}").json()["title"] == TASK["title"]

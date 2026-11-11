@@ -22,6 +22,7 @@ def get_db():
 
 def get_user(creds: HTTPAuthorizationCredentials = Depends(bearer)) -> dict:
     try:
-        return auth.verify_id_token(creds.credentials, app=firebase_app())
-    except (ValueError, auth.InvalidIdTokenError):
+        # check_revoked rejects signed-out-everywhere, disabled and deleted users (one extra lookup per request).
+        return auth.verify_id_token(creds.credentials, app=firebase_app(), check_revoked=True)
+    except (ValueError, auth.InvalidIdTokenError, auth.UserDisabledError, auth.UserNotFoundError):
         raise HTTPException(401, "Invalid or expired token")
