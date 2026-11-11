@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as fa from 'firebase/auth'
+import { api } from './api.js'
 import App from './App.jsx'
 
 vi.mock('./api.js', () => ({ api: vi.fn(() => Promise.resolve([])) }))
@@ -33,7 +34,10 @@ const type = (label, value) => fireEvent.change(screen.getByLabelText(label), { 
 const click = (name) => fireEvent.click(screen.getByRole('button', { name }))
 const flush = () => act(() => Promise.resolve())
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  window.location.hash = ''
+})
 afterEach(cleanup)
 
 describe('session', () => {
@@ -138,5 +142,70 @@ describe('sign up', () => {
     click('Back')
     fireEvent.click(screen.getByText('Privacy Policy'))
     expect(screen.getByRole('heading', { name: 'Privacy Policy' })).toBeTruthy()
+  })
+})
+
+describe('routing', () => {
+  it('opens a deep-linked page and keeps it in the URL', () => {
+    window.location.hash = '#/signup'
+    setup()
+    expect(screen.getByRole('button', { name: /create account/i })).toBeTruthy()
+    fireEvent.click(screen.getByText('Sign in'))
+    expect(window.location.hash).toBe('#/signin')
+  })
+
+  it('follows hash changes to help and back', async () => {
+    setup({ uid: 'u1' })
+    window.location.hash = '#/help'
+    await screen.findByRole('heading', { name: 'Help & Documentation' })
+    click('Back')
+    expect(window.location.hash).toBe('#/')
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy()
+  })
+
+  it('hides account pages when signed out', () => {
+    window.location.hash = '#/settings'
+    setup()
+    expect(screen.getByRole('button', { name: /^sign in/i })).toBeTruthy()
+  })
+})
+
+describe('settings', () => {
+  const PROFILE = { id: 'a@x.com', email: 'a@x.com', createdAt: 'x', name: 'Alex', avatar: '', tags: ['work'], preferences: { theme: 'dark' } }
+
+  it('saves name and default view, keeping other profile fields', async () => {
+    api.mockImplementation((path, opts) => Promise.resolve(opts ? { ...PROFILE, ...opts.body } : PROFILE))
+    window.location.hash = '#/settings'
+    setup({ uid: 'u1' })
+    await flush()
+    expect(screen.getByLabelText('Display Name').value).toBe('Alex')
+    type('Default Calendar View', 'Month')
+    click('Save')
+    await flush()
+    expect(api).toHaveBeenCalledWith('/users/me', {
+      method: 'PUT',
+      body: { name: 'Alex', avatar: '', tags: ['work'], preferences: { theme: 'dark', defaultView: 'Month' } },
+    })
+    expect(screen.getByRole('status').textContent).toBe('Settings saved.')
+  })
+
+  it('creates the profile when none exists', async () => {
+    api.mockImplementation((path, opts) => (opts ? Promise.resolve(opts.body) : Promise.reject(Object.assign(new Error('404'), { status: 404 }))))
+    window.location.hash = '#/settings'
+    setup({ uid: 'u1' })
+    await flush()
+    type('Display Name', 'Sam')
+    click('Save')
+    await flush()
+    expect(api).toHaveBeenCalledWith('/users/me', { method: 'PUT', body: { name: 'Sam', preferences: { defaultView: 'Week' } } })
+  })
+
+  it('blocks saving when the profile fails to load', async () => {
+    api.mockRejectedValue(Object.assign(new Error('offline'), { status: 500 }))
+    window.location.hash = '#/settings'
+    setup({ uid: 'u1' })
+    await flush()
+    expect(screen.getByRole('alert').textContent).toContain('offline')
+    expect(screen.getByRole('button', { name: 'Save' }).disabled).toBe(true)
   })
 })

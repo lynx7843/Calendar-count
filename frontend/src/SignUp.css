@@ -107,14 +107,14 @@
 .signup .label-row label { margin-bottom: 0; }
 .signup .input-wrap { position: relative; display: flex; align-items: center; }
 .signup .input-wrap .lead { position: absolute; left: 12px; color: var(--tertiary); pointer-events: none; }
-.signup .input-wrap input {
+.signup .input-wrap input, .signup .input-wrap select {
   width: 100%; padding: 10px 16px 10px 40px; border: 0; border-radius: 4px;
   background: var(--surface-lowest); color: var(--on-surface); font: 400 14px/20px 'Inter', sans-serif;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(125, 115, 134, 0.12); transition: all 0.15s;
 }
 .signup .input-wrap input.has-trail { padding-right: 40px; }
 .signup .input-wrap input::placeholder { color: var(--tertiary-fixed-dim); }
-.signup .input-wrap input:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px rgba(119, 27, 216, 0.4); }
+.signup .input-wrap input:focus, .signup .input-wrap select:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px rgba(119, 27, 216, 0.4); }
 .signup .pwd-toggle { position: absolute; right: 12px; display: flex; color: var(--tertiary); }
 .signup .pwd-toggle:hover { color: var(--on-surface); }
 

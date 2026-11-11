@@ -1,4 +1,5 @@
 // Calendar date math in local time; weeks start on Monday.
+export const VIEWS = ['Month', 'Week', 'Day', 'Agenda']
 export const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
 export const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
 export const sameDay = (a, b) => startOfDay(a).getTime() === startOfDay(b).getTime()
