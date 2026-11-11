@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from google.auth.exceptions import GoogleAuthError
 from google.cloud.firestore_v1.base_query import FieldFilter
 from pydantic import ValidationError
 
@@ -22,6 +24,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Handled inside CORS, so the browser sees this instead of "Failed to fetch".
+@app.exception_handler(GoogleAuthError)
+def missing_credentials(request, exc):
+    return JSONResponse({"detail": "Server can't reach the database: set GOOGLE_APPLICATION_CREDENTIALS"}, status_code=503)
 
 
 def now():

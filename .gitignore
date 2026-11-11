@@ -21,7 +21,7 @@ htmlcov/
 *.local
 !.env.example
 *serviceAccount*.json
-*-firebase-adminsdk-*.json
+firebase-adminsdk.json
 
 # Logs
 *.log

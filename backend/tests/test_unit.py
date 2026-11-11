@@ -57,3 +57,13 @@ def test_subtasks_are_typed():
     assert Task(title="x", subTasks=[{"title": "a"}]).subTasks[0].done is False
     with pytest.raises(ValidationError):
         Task(title="x", subTasks=["a"])
+
+
+def test_firebase_app_uses_project_id(monkeypatch):
+    seen = {}
+    monkeypatch.setenv("VITE_FIREBASE_PROJECT_ID", "proj")
+    monkeypatch.setattr(deps.firebase_admin, "initialize_app", lambda options=None: seen.setdefault("o", options))
+    deps.firebase_app.cache_clear()
+    deps.firebase_app()
+    deps.firebase_app.cache_clear()
+    assert seen["o"] == {"projectId": "proj"}
