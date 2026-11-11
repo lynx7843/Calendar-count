@@ -74,6 +74,17 @@ describe('calendar', () => {
     expect(screen.getByText('Wednesday, Nov 11')).toBeTruthy()
   })
 
+  it('shows loading until data arrives, then the empty state', async () => {
+    let resolve
+    api.mockImplementation((path) => (path === '/events' ? new Promise((r) => (resolve = r)) : Promise.resolve(DATA[path])))
+    await setup()
+    expect(screen.getByRole('status').textContent).toBe('Loading your calendar…')
+    expect(screen.queryByText('No activities in this period.')).toBeNull()
+    await act(async () => resolve([]))
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.getByText('No activities in this period.')).toBeTruthy()
+  })
+
   it('shows load error', async () => {
     api.mockRejectedValue(new Error('offline'))
     await setup()
