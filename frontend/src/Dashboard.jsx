@@ -2,20 +2,21 @@ import { Fragment, useEffect, useState } from 'react'
 import { api } from './api.js'
 import {
   addDays, completePatch, dateKey, dayLabel, monthGrid, monthLabel, periodLabel, periodRange,
-  daysIn, sameDay, shift, startOfDay, timeLabel, toItems,
+  daysIn, sameDay, shift, startOfDay, timeLabel, toItems, VIEWS,
 } from './calendar.js'
 import { completion, dayProgress, pct, streak } from './stats.js'
 import TasksPanel from './Tasks.jsx'
 import './Dashboard.css'
 
-const NAV_VIEWS = ['Month', 'Week', 'Day', 'Agenda']
-
 const FILTERS = [
-  { icon: 'calendar_today', label: 'All Activities', active: true },
-  { icon: 'repeat', label: 'Repeating Routines' },
-  { icon: 'check_circle', label: 'One-time Tasks' },
-  { icon: 'history', label: 'Completed History' },
+  { id: 'all', icon: 'calendar_today', label: 'All Activities', keep: () => true },
+  { id: 'routine', icon: 'repeat', label: 'Repeating Routines', keep: (i) => i.routine },
+  { id: 'onetime', icon: 'check_circle', label: 'One-time Tasks', keep: (i) => !i.routine },
+  { id: 'history', icon: 'history', label: 'Completed History', keep: (i) => i.done },
 ]
+
+// Search text: title, #tags, weekday/date and time.
+const haystack = (i) => [i.title, ...i.tags.map((t) => `#${t}`), dayLabel(i.start), timeLabel(i.start)].join(' ').toLowerCase()
 
 const REPEAT_OPTIONS = ['daily', 'weekly', 'monthly']
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -419,6 +420,8 @@ function AgendaView({ items, renderItem }) {
 
 export default function Dashboard({ onSignOut }) {
   const [filter, setFilter] = useState('all')
+  const [side, setSide] = useState('all')
+  const [query, setQuery] = useState('')
   const [modal, setModal] = useState(null) // null, {} to create, { event } to edit
   const [view, setView] = useState('Week')
   const [cursor, setCursor] = useState(() => new Date())
@@ -431,6 +434,10 @@ export default function Dashboard({ onSignOut }) {
     Promise.all(SOURCES.map((s) => api(`/${s}`)))
       .then(([events, assignments, tasks, progress]) => setData({ events, assignments, tasks, progress }))
       .catch((e) => setError(`Couldn't load your calendar: ${e.message}`))
+    // Optional: no profile yet (404) just keeps the default view.
+    api('/users/me')
+      .then((u) => VIEWS.includes(u?.preferences?.defaultView) && setView(u.preferences.defaultView))
+      .catch(() => {})
   }, [])
 
   // Local doc cache: replace in place or append; drop by id.
@@ -501,8 +508,15 @@ export default function Dashboard({ onSignOut }) {
     (filter === 'pending' && (kind === 'done' || kind === 'doneToday')) ||
     (filter === 'done' && kind === 'pending')
 
+  // shortcut: re-expands a year of items each render, memoize if it gets slow
+  const today = startOfDay(now)
+  const history = toItems(data, addDays(today, -365), addDays(today, 1))
   const [start, end] = periodRange(view, cursor)
-  const visible = toItems(data, start, end)
+  const isHistory = side === 'history'
+  const q = query.trim().toLowerCase()
+  const { keep } = FILTERS.find((f) => f.id === side)
+  // shortcut: search covers the visible period only (history: past year), add a global search if users ask
+  const visible = (isHistory ? history.toReversed() : toItems(data, start, end)).filter((i) => keep(i) && (!q || haystack(i).includes(q)))
   const renderItem = (item) => {
     const cell = cellFor(item, now)
     if (hide(cell.kind)) return null
@@ -530,9 +544,6 @@ export default function Dashboard({ onSignOut }) {
     { id: 'done', label: `Done (${shown.done})` },
   ]
 
-  // shortcut: re-expands a year of items each render, memoize if it gets slow
-  const today = startOfDay(now)
-  const history = toItems(data, addDays(today, -365), addDays(today, 1))
   const todayStats = dayProgress(history, now)
   const todayPct = pct(todayStats)
   const missedToday = history.some((i) => sameDay(i.start, now) && i.start < now && !i.done)
@@ -582,12 +593,18 @@ export default function Dashboard({ onSignOut }) {
 
         <div className="search hide-lg">
           <Icon name="search" size={18} />
-          <input type="search" placeholder="Search activities, tags, schedules..." />
+          <input
+            type="search"
+            aria-label="Search activities"
+            placeholder="Search activities, tags, schedules..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
         </div>
 
         <div className="row gap-md">
           <nav className="view-tabs hide-xl">
-            {NAV_VIEWS.map((v) => (
+            {VIEWS.map((v) => (
               <a
                 key={v}
                 href="#"
@@ -603,12 +620,12 @@ export default function Dashboard({ onSignOut }) {
             ))}
           </nav>
           <div className="row gap-xs">
-            <button type="button" className="icon-btn pad" title="Help & documentation" aria-label="Help">
+            <a className="icon-btn pad" href="#/help" title="Help & documentation" aria-label="Help">
               <Icon name="help" size={20} />
-            </button>
-            <button type="button" className="icon-btn pad" title="Settings" aria-label="Settings">
+            </a>
+            <a className="icon-btn pad" href="#/settings" title="Settings" aria-label="Settings">
               <Icon name="settings" size={20} />
-            </button>
+            </a>
             <button type="button" className="icon-btn pad" title="Sign out" aria-label="Sign out" onClick={onSignOut}>
               <Icon name="logout" size={20} />
             </button>
@@ -663,11 +680,14 @@ export default function Dashboard({ onSignOut }) {
             <nav className="col side-nav">
               {FILTERS.map((f) => (
                 <a
-                  key={f.label}
+                  key={f.id}
                   href="#"
-                  className={f.active ? 'on' : ''}
-                  aria-current={f.active ? 'page' : undefined}
-                  onClick={(e) => e.preventDefault()}
+                  className={side === f.id ? 'on' : ''}
+                  aria-current={side === f.id ? 'page' : undefined}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    setSide(f.id)
+                  }}
                 >
                   <Icon name={f.icon} size={18} />
                   <span>{f.label}</span>
@@ -755,9 +775,9 @@ export default function Dashboard({ onSignOut }) {
         <div className="workspace">
           <div className="row between wrap gap-md">
             <div className="row gap-sm">
-              <span className="headline-md">{view}</span>
+              <span className="headline-md">{isHistory ? 'Completed History' : view}</span>
               <span className="muted">·</span>
-              <span className="body-md-medium muted">{periodLabel(view, cursor)}</span>
+              <span className="body-md-medium muted">{isHistory ? 'Last 12 months' : periodLabel(view, cursor)}</span>
             </div>
             <div className="row gap-md label-sm muted hide-md-down">
               <div className="row gap-1h"><span className="dot d-primary" /><span>Repeating Routines</span></div>
@@ -767,7 +787,9 @@ export default function Dashboard({ onSignOut }) {
           </div>
 
           {error && <p className="cal-error" role="alert">{error}</p>}
-          {view === 'Month' ? (
+          {isHistory ? (
+            <AgendaView {...viewProps} />
+          ) : view === 'Month' ? (
             <MonthView cursor={cursor} {...viewProps} />
           ) : view === 'Agenda' ? (
             <AgendaView {...viewProps} />

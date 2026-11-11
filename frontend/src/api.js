@@ -9,6 +9,6 @@ export async function api(path, { method = 'GET', body } = {}) {
     headers: { Authorization: `Bearer ${token}`, ...(body && { 'Content-Type': 'application/json' }) },
     body: body && JSON.stringify(body),
   })
-  if (!res.ok) throw new Error(`${method} ${path} failed (${res.status})`)
+  if (!res.ok) throw Object.assign(new Error(`${method} ${path} failed (${res.status})`), { status: res.status })
   return res.status === 204 ? null : res.json()
 }

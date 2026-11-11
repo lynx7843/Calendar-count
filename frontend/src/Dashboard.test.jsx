@@ -117,7 +117,7 @@ describe('activities', () => {
     type('To', '09:00')
     click(/Schedule Activity/)
     expect(screen.getByRole('alert').textContent).toContain('End time')
-    expect(api).toHaveBeenCalledTimes(4) // only the initial loads
+    expect(api).toHaveBeenCalledTimes(5) // only the initial loads + profile
   })
 
   it('edits and deletes an event', async () => {
@@ -242,5 +242,50 @@ describe('progress', () => {
     expect(screen.getByText('Progress · 3h logged')).toBeTruthy()
     expect(screen.getByText('Next: Find sources', { exact: false })).toBeTruthy()
     DATA['/tasks'] = []
+  })
+})
+
+describe('navigation and filters', () => {
+  const run = { id: 'r1', title: 'Run', type: 'routine', frequency: 'daily', tags: ['health'], completedDates: ['2026-11-10'],
+    startTime: new Date(2026, 10, 9, 7).toISOString(), endTime: new Date(2026, 10, 9, 8).toISOString() }
+  beforeEach(() => api.mockImplementation((path) => Promise.resolve(path === '/events' ? [...DATA['/events'], run] : DATA[path])))
+  const side = (name) => fireEvent.click(screen.getByRole('link', { name: new RegExp(`${name}$`) }))
+
+  it('filters by routine, one-time and completed history', async () => {
+    await setup()
+    side('Repeating Routines')
+    expect(screen.queryByText('Dentist')).toBeNull()
+    expect(screen.getAllByText('Run').length).toBe(7)
+    side('One-time Tasks')
+    expect(screen.getByText('Dentist')).toBeTruthy()
+    expect(screen.queryByText('Run')).toBeNull()
+    side('Completed History')
+    expect(screen.getByText('Last 12 months')).toBeTruthy()
+    expect(screen.getAllByText('Run').length).toBe(1) // only Tue 10 is done
+    expect(screen.getByText('Tuesday, Nov 10')).toBeTruthy()
+  })
+
+  it('searches titles, tags and weekdays', async () => {
+    await setup()
+    type('Search activities', 'dent')
+    expect(screen.getByText('Dentist')).toBeTruthy()
+    expect(screen.queryByText('Run')).toBeNull()
+    type('Search activities', '#health')
+    expect(screen.getAllByText('Run').length).toBe(7)
+    type('Search activities', 'friday')
+    expect(screen.getAllByText('Run').length).toBe(1)
+    expect(screen.getByRole('button', { name: 'Pending (1)' })).toBeTruthy()
+  })
+
+  it('opens the saved default view', async () => {
+    api.mockImplementation((path) => Promise.resolve(path === '/users/me' ? { preferences: { defaultView: 'Agenda' } } : DATA[path]))
+    await setup()
+    expect(screen.getByText('Agenda', { selector: '.headline-md' })).toBeTruthy()
+  })
+
+  it('links to help and settings', async () => {
+    await setup()
+    expect(screen.getByRole('link', { name: 'Help' }).getAttribute('href')).toBe('#/help')
+    expect(screen.getByRole('link', { name: 'Settings' }).getAttribute('href')).toBe('#/settings')
   })
 })
