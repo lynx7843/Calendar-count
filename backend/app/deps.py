@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 
 import firebase_admin
@@ -10,8 +11,9 @@ bearer = HTTPBearer()
 
 @lru_cache
 def firebase_app():
-    # Reads service account from GOOGLE_APPLICATION_CREDENTIALS.
-    return firebase_admin.initialize_app()
+    # Service account from GOOGLE_APPLICATION_CREDENTIALS; project ID lets token checks work without it.
+    project = os.getenv("VITE_FIREBASE_PROJECT_ID")
+    return firebase_admin.initialize_app(options={"projectId": project} if project else None)
 
 
 def get_db():

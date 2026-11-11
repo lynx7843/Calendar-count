@@ -89,3 +89,19 @@ def test_routine_completion_and_subtasks(client):
     assert parts["subTasks"] == [{"title": "Outline", "done": False}]
     a = client.post("/assignments", json={"taskId": task_id, "eventDate": "2026-01-02T09:00:00Z", "part": "Outline"})
     assert a.status_code == 201 and a.json()["assignedTo"] == ""
+
+
+def test_missing_credentials_is_503_with_cors(client):
+    from google.auth.exceptions import DefaultCredentialsError
+
+    from app.deps import get_db
+
+    def no_db():
+        raise DefaultCredentialsError("no creds")
+
+    app.dependency_overrides[get_db] = no_db
+    res = client.post("/events", headers={"Origin": "http://localhost:5173"},
+                      json={"title": "Run", "startTime": "2026-01-01T07:00:00Z", "endTime": "2026-01-01T08:00:00Z", "type": "routine"})
+    assert res.status_code == 503
+    assert "GOOGLE_APPLICATION_CREDENTIALS" in res.json()["detail"]
+    assert res.headers["access-control-allow-origin"] == "http://localhost:5173"
